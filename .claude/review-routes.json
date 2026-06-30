@@ -1,0 +1,60 @@
+{
+  "version": 1,
+  "_comment": "Primary-owner routing for the Stop review-gate. First matching primary glob wins. Repo-relative globs vs `git diff --name-only`.",
+  "cap": 3,
+  "primary": [
+    { "glob": "**/*.test.*", "owner": "testing-reviewer" },
+    { "glob": "**/*.spec.*", "owner": "testing-reviewer" },
+    { "glob": "apps/desktop/src-tauri/tests/**", "owner": "testing-reviewer" },
+    { "glob": "**/e2e/**", "owner": "testing-reviewer" },
+    { "glob": "apps/desktop/src-tauri/src/providers/kick/**", "owner": "kick-provider-reviewer" },
+    { "glob": "apps/desktop/src-tauri/src/server/**", "owner": "realtime-reviewer" },
+    { "glob": "apps/desktop/src/**", "owner": "frontend-reviewer" },
+    { "glob": "apps/overlay/**", "owner": "frontend-reviewer" },
+    { "glob": "packages/ui/**", "owner": "frontend-reviewer" },
+    { "glob": "apps/desktop/src-tauri/src/**", "owner": "rust-backend-architect" },
+    { "glob": "packages/shared/**", "owner": "rust-backend-architect" },
+    { "glob": "packages/types/**", "owner": "rust-backend-architect" },
+    { "glob": "docs/**", "owner": "project-steward" }
+  ],
+  "secondary": [
+    {
+      "owner": "tauri-security-reviewer",
+      "globs": [
+        "apps/desktop/src-tauri/capabilities/**",
+        "apps/desktop/src-tauri/tauri.conf.json",
+        "apps/desktop/src-tauri/src/net/**",
+        "apps/desktop/src-tauri/src/db/**",
+        "apps/desktop/src-tauri/src/providers/kick/**",
+        "**/Cargo.toml",
+        "**/Cargo.lock",
+        "**/package.json",
+        "**/pnpm-lock.yaml"
+      ]
+    },
+    {
+      "owner": "performance-profiler",
+      "globs": [
+        "apps/desktop/src-tauri/src/server/**",
+        "apps/desktop/src-tauri/src/domain/vote.rs",
+        "apps/desktop/src-tauri/src/providers/kick/**"
+      ]
+    },
+    {
+      "owner": "ui-ux-expert",
+      "globs": ["apps/desktop/src/**", "apps/overlay/**", "packages/ui/**"]
+    }
+  ],
+  "advisory": {
+    "docs_stale": ["packages/types/**", "apps/desktop/src-tauri/src/commands/**"],
+    "release": [".github/workflows/**"]
+  },
+  "lessons_domains": {
+    "kick": ["apps/desktop/src-tauri/src/providers/kick/**"],
+    "realtime": ["apps/desktop/src-tauri/src/server/**"],
+    "rust": ["apps/desktop/src-tauri/src/**", "packages/shared/**", "packages/types/**"],
+    "frontend": ["apps/desktop/src/**", "apps/overlay/**", "packages/ui/**"],
+    "security": ["apps/desktop/src-tauri/capabilities/**", "apps/desktop/src-tauri/src/net/**", "apps/desktop/src-tauri/src/db/**"],
+    "testing": ["**/*.test.*", "**/*.spec.*", "apps/desktop/src-tauri/tests/**"]
+  }
+}
