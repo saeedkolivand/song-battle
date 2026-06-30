@@ -90,7 +90,7 @@ function SortableSongRow({
         {...listeners}
         disabled={disabled}
         aria-label={`Reorder ${song.title}`}
-        className="flex h-9 w-7 shrink-0 cursor-grab touch-none items-center justify-center rounded-md text-white/40 hover:text-white/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent active:cursor-grabbing"
+        className="flex h-9 w-7 shrink-0 cursor-grab touch-none items-center justify-center rounded-md text-white/50 hover:text-white/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent active:cursor-grabbing"
       >
         <GripIcon />
       </button>
@@ -164,7 +164,7 @@ export function SongsPage() {
       <PageHeader title="Songs" subtitle="Import tracks by URL. YouTube, Spotify and SoundCloud links are supported." />
 
       <Section title="Import song">
-        <p className="mb-4 text-sm text-white/40">
+        <p className="mb-4 text-sm text-white/50">
           Viewers can also add songs by typing <code className="rounded bg-white/10 px-1 text-white/70">!submit &lt;url&gt;</code> in
           chat while the bracket hasn&apos;t started yet (lobby only). Toggle this in Settings.
         </p>
@@ -188,7 +188,7 @@ export function SongsPage() {
       </Section>
 
       <Section title="Songs" action={<Pill tone="idle">{count} total</Pill>}>
-        <p className="mb-4 text-sm text-white/40">
+        <p className="mb-4 text-sm text-white/50">
           {lobby
             ? 'Drag to set the bracket seeding (#1 faces the lowest seed).'
             : 'Seeding locked — a bracket has been generated.'}

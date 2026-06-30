@@ -22,3 +22,21 @@ body {
   scrollbar-width: thin;
   scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
 }
+
+/* Windows High Contrast / forced-colors: the toggle's bg colours are stripped, so
+   redraw track + thumb with system colours. (Settings + OBS switches.) */
+@media (forced-colors: active) {
+  .sb-toggle-track {
+    border: 1px solid CanvasText;
+    background: Canvas;
+  }
+  .peer:checked ~ .sb-toggle-track {
+    background: Highlight;
+  }
+  .sb-toggle-thumb {
+    background: CanvasText;
+  }
+  .peer:checked ~ .sb-toggle-thumb {
+    background: HighlightText;
+  }
+}

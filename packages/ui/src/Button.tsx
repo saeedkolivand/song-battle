@@ -37,7 +37,6 @@ export function Button({
   ...rest
 }: ButtonProps) {
   return (
-    // eslint-disable-next-line react/button-has-type -- type defaulted/forwarded above
     <button type={type} className={`${base} ${variants[variant]} ${sizes[size]} ${className}`} {...rest} />
   );
 }

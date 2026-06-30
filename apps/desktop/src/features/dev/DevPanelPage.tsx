@@ -49,7 +49,7 @@ export function DevPanelPage() {
           <div className="flex items-center justify-between rounded-xl border border-white/10 bg-black/20 px-4 py-3">
             <span className="text-sm text-white/60">Snapshot stream</span>
             <span className="flex items-center gap-2">
-              <span className="text-xs text-white/40">{lastAgo}</span>
+              <span className="text-xs text-white/50">{lastAgo}</span>
               <ConnectionPill state={streamState} />
             </span>
           </div>
@@ -79,8 +79,8 @@ export function DevPanelPage() {
           <ul className="max-h-80 overflow-y-auto rounded-xl border border-white/10 bg-black/30 p-3 font-mono text-xs">
             {events.map((e) => (
               <li key={e.seq} className="flex gap-3 border-b border-white/5 py-1 last:border-0">
-                <span className="shrink-0 tabular-nums text-white/40">#{e.seq}</span>
-                <span className="shrink-0 tabular-nums text-white/40">{clock(e.ts)}</span>
+                <span className="shrink-0 tabular-nums text-white/50">#{e.seq}</span>
+                <span className="shrink-0 tabular-nums text-white/50">{clock(e.ts)}</span>
                 <span className="text-white/80">{e.summary}</span>
               </li>
             ))}
@@ -95,10 +95,10 @@ export function DevPanelPage() {
           <ul className="max-h-64 overflow-y-auto rounded-xl border border-white/10 bg-black/30 p-3 font-mono text-xs">
             {votes.map((v, i) => (
               <li key={`${v.matchId}-${i}`} className="flex gap-3 border-b border-white/5 py-1 last:border-0">
-                <span className="shrink-0 tabular-nums text-white/40">{clock(v.ts)}</span>
+                <span className="shrink-0 tabular-nums text-white/50">{clock(v.ts)}</span>
                 <span className="shrink-0 text-accent">A {v.a}</span>
                 <span className="shrink-0 text-sky-400">B {v.b}</span>
-                <span className="truncate text-white/40">{v.matchId.slice(0, 8)}</span>
+                <span className="truncate text-white/50">{v.matchId.slice(0, 8)}</span>
               </li>
             ))}
           </ul>

@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Song Battle"
 authors = ["Saeed Kolivand"]
 edition = "2021"
+publish = false
 
 [lib]
 # The `_lib` suffix keeps the lib name unique from the bin (Windows; see rust-lang/cargo#8519).

@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { useId, type ReactNode } from 'react';
 import type { BattleStatus, ConnectionState, MatchState } from '@sb/types';
 
 export function PageHeader({ title, subtitle }: { title: string; subtitle?: string }) {
@@ -12,20 +12,33 @@ export function PageHeader({ title, subtitle }: { title: string; subtitle?: stri
 
 export function Section({
   title,
+  label,
   action,
   children,
   className = '',
 }: {
   title?: string;
+  label?: string; // accessible name when there's no visible title
   action?: ReactNode;
   children: ReactNode;
   className?: string;
 }) {
+  const headingId = useId();
   return (
-    <section className={`rounded-2xl border border-white/10 bg-white/5 p-6 shadow-xl backdrop-blur-md ${className}`}>
+    <section
+      aria-labelledby={title ? headingId : undefined}
+      aria-label={title ? undefined : label}
+      className={`rounded-2xl border border-white/10 bg-white/5 p-6 shadow-xl backdrop-blur-md ${className}`}
+    >
       {title || action ? (
         <div className="mb-4 flex items-center justify-between gap-3">
-          {title ? <h2 className="text-sm font-semibold uppercase tracking-wider text-white/60">{title}</h2> : <span />}
+          {title ? (
+            <h2 id={headingId} className="text-sm font-semibold uppercase tracking-wider text-white/60">
+              {title}
+            </h2>
+          ) : (
+            <span />
+          )}
           {action}
         </div>
       ) : null}
@@ -36,10 +49,10 @@ export function Section({
 
 export function Stat({ label, value }: { label: string; value: ReactNode }) {
   return (
-    <div className="rounded-xl border border-white/10 bg-black/20 px-4 py-3">
-      <div className="text-xs uppercase tracking-wider text-white/40">{label}</div>
-      <div className="mt-1 text-lg font-semibold text-white">{value}</div>
-    </div>
+    <dl className="rounded-xl border border-white/10 bg-black/20 px-4 py-3">
+      <dt className="text-xs uppercase tracking-wider text-white/50">{label}</dt>
+      <dd className="mt-1 text-lg font-semibold text-white">{value}</dd>
+    </dl>
   );
 }
 
@@ -70,7 +83,12 @@ const connectionTone: Record<ConnectionState, Tone> = {
 };
 
 export function ConnectionPill({ state }: { state: ConnectionState }) {
-  return <Pill tone={connectionTone[state]}>{state}</Pill>;
+  // Live region so connection changes (Kick/OBS/stream) are announced.
+  return (
+    <span aria-live="polite" aria-atomic="true">
+      <Pill tone={connectionTone[state]}>{state}</Pill>
+    </span>
+  );
 }
 
 const battleTone: Record<BattleStatus, Tone> = { idle: 'idle', running: 'live', finished: 'good' };
@@ -122,7 +140,7 @@ export function EmptyState({ title, hint }: { title: string; hint?: string }) {
   return (
     <div className="rounded-2xl border border-dashed border-white/15 bg-white/[0.02] px-6 py-12 text-center">
       <p className="text-sm font-medium text-white/70">{title}</p>
-      {hint ? <p className="mx-auto mt-1 max-w-md text-sm text-white/40">{hint}</p> : null}
+      {hint ? <p className="mx-auto mt-1 max-w-md text-sm text-white/50">{hint}</p> : null}
     </div>
   );
 }

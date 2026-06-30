@@ -29,8 +29,8 @@ function Toggle({
           onChange={(e) => onChange(e.target.checked)}
           disabled={disabled}
         />
-        <span className="h-6 w-11 rounded-full bg-white/15 transition-colors peer-checked:bg-accent peer-focus-visible:outline-none peer-focus-visible:ring-2 peer-focus-visible:ring-accent peer-focus-visible:ring-offset-2 peer-focus-visible:ring-offset-black" />
-        <span className="pointer-events-none absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white transition-transform peer-checked:translate-x-5" />
+        <span className="sb-toggle-track h-6 w-11 rounded-full bg-white/15 transition-colors peer-checked:bg-accent peer-focus-visible:outline-none peer-focus-visible:ring-2 peer-focus-visible:ring-accent peer-focus-visible:ring-offset-2 peer-focus-visible:ring-offset-black" />
+        <span className="sb-toggle-thumb pointer-events-none absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white transition-transform peer-checked:translate-x-5" />
       </span>
       <span className="text-sm text-white">{label}</span>
     </label>
@@ -109,7 +109,7 @@ export function SettingsPage() {
         <div className="flex flex-col gap-5">
           <div>
             <Toggle label="Anonymous voting" checked={anonymous} disabled={pending} onChange={onAnonymous} />
-            <p className="mt-2 text-sm text-white/40">
+            <p className="mt-2 text-sm text-white/50">
               Hides voter and submitter identities from viewers (the overlay). Only counts and totals are shown; the
               dashboard still shows who submitted each song.
             </p>
@@ -121,7 +121,7 @@ export function SettingsPage() {
               disabled={pending}
               onChange={onChatSubmissions}
             />
-            <p className="mt-2 text-sm text-white/40">
+            <p className="mt-2 text-sm text-white/50">
               Viewers can add songs by typing <code className="rounded bg-white/10 px-1 text-white/70">!submit &lt;url&gt;</code> in
               chat while the bracket hasn&apos;t started (lobby only). Hiding the submitter from viewers is controlled by the
               Anonymous toggle above.
@@ -141,7 +141,7 @@ export function SettingsPage() {
             ))}
           </Select>
         </label>
-        <p className="mt-2 text-sm text-white/40">Used by Start match when no per-match timer is set.</p>
+        <p className="mt-2 text-sm text-white/50">Used by Start match when no per-match timer is set.</p>
       </Section>
 
       <Section title="Accent colour">
@@ -163,7 +163,7 @@ export function SettingsPage() {
       </Section>
 
       <Section title="Keyboard shortcuts">
-        <p className="mb-3 text-sm text-white/40">Active in the dashboard (ignored while typing in a field).</p>
+        <p className="mb-3 text-sm text-white/50">Active in the dashboard (ignored while typing in a field).</p>
         <dl className="grid grid-cols-1 gap-2 sm:grid-cols-2">
           {HOTKEYS.map((h) => (
             <div key={h.keys} className="flex items-center justify-between gap-3 rounded-lg border border-white/10 bg-black/20 px-3 py-2">

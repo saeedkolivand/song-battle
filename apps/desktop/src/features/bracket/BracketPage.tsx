@@ -12,6 +12,18 @@ const PRESETS = [10, 20, 30, 60];
 const MODE_OPTIONS: BattleMode[] = ['single', 'double', 'bo3'];
 const DOUBLE_GROUPS: MatchGroup[] = ['winners', 'losers', 'grand'];
 
+// Screen-reader announcement for the current match state / outcome (aria-live).
+function announce(battle: BattleView): string {
+  if (battle.status === 'finished' && battle.winner) return `Champion: ${battle.winner.title}`;
+  const m = battle.currentMatch;
+  if (!m) return '';
+  const a = m.a?.title ?? 'A';
+  const b = m.b?.title ?? 'B';
+  if (m.winner) return `${m.winner === 'a' ? a : b} wins this round`;
+  if (m.state === 'active') return `Voting open: ${a} versus ${b}`;
+  return `Up next: ${a} versus ${b}`;
+}
+
 function groupByRound(bracket: MatchView[]): [number, MatchView[]][] {
   const rounds = new Map<number, MatchView[]>();
   for (const m of bracket) {
@@ -26,10 +38,16 @@ function MiniMatch({ match }: { match: MatchView }) {
   const aWon = match.winner === 'a';
   const bWon = match.winner === 'b';
   const series = match.bestOf > 1;
+  const aName = match.a?.title ?? 'TBD';
+  const bName = match.b?.title ?? 'TBD';
   return (
-    <div className="rounded-xl border border-white/10 bg-black/20 p-3">
+    <div
+      role="group"
+      aria-label={`Match: ${aName} vs ${bName}, ${match.state}`}
+      className="rounded-xl border border-white/10 bg-black/20 p-3"
+    >
       <div className="mb-2 flex items-center justify-between">
-        <span className="text-xs text-white/40">{series ? `Best of ${match.bestOf}` : 'Match'}</span>
+        <span className="text-xs text-white/50">{series ? `Best of ${match.bestOf}` : 'Match'}</span>
         <MatchPill state={match.state} />
       </div>
       <div className="flex flex-col gap-1 text-sm">
@@ -56,9 +74,9 @@ function RoundsGrid({ matches }: { matches: MatchView[] }) {
     <div className="flex flex-col gap-5">
       {groupByRound(matches).map(([round, ms]) => (
         <div key={round}>
-          <div className="mb-2 text-xs uppercase tracking-wider text-white/40">
+          <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-white/50">
             Round {round} · {ms.length} match{ms.length === 1 ? '' : 'es'}
-          </div>
+          </h3>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {ms.map((m) => (
               <MiniMatch key={m.id} match={m} />
@@ -83,7 +101,7 @@ function BracketView({ battle }: { battle: BattleView }) {
         if (matches.length === 0) return null;
         return (
           <div key={g}>
-            <div className="mb-2 text-sm font-semibold uppercase tracking-wider text-white/60">{groupLabel(g)}</div>
+            <h3 className="mb-2 text-sm font-semibold uppercase tracking-wider text-white/60">{groupLabel(g)}</h3>
             <RoundsGrid matches={matches} />
           </div>
         );
@@ -139,6 +157,10 @@ export function BracketPage() {
   return (
     <div className="flex flex-col gap-6">
       <PageHeader title="Bracket" subtitle={`${modeLabel(battle.mode)} · run matches and let chat decide.`} />
+
+      <p className="sr-only" aria-live="polite" aria-atomic="true">
+        {announce(battle)}
+      </p>
 
       {error ? <ErrorNote message={error} /> : null}
 

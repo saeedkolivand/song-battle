@@ -25,12 +25,15 @@ body,
     0 0 0.12vw rgba(0, 0, 0, 0.55);
 }
 
-/* Travelling highlight on the leading vote bar (JS gates it off under reduced motion). */
-@keyframes sb-shimmer {
-  0% {
-    transform: translateX(-130%) skewX(-12deg);
-  }
-  100% {
-    transform: translateX(360%) skewX(-12deg);
+/* Travelling highlight on the leading vote bar. JS already gates it off under
+   reduced motion; wrapping the keyframes is CSS-level defence in depth. */
+@media (prefers-reduced-motion: no-preference) {
+  @keyframes sb-shimmer {
+    0% {
+      transform: translateX(-130%) skewX(-12deg);
+    }
+    100% {
+      transform: translateX(360%) skewX(-12deg);
+    }
   }
 }

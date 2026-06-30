@@ -133,12 +133,12 @@ export function OBSPage() {
                 checked={settings.autoSwitch}
                 onChange={(e) => patchSettings({ autoSwitch: e.target.checked })}
               />
-              <span className="h-6 w-11 rounded-full bg-white/15 transition-colors peer-checked:bg-accent peer-focus-visible:outline-none peer-focus-visible:ring-2 peer-focus-visible:ring-accent peer-focus-visible:ring-offset-2 peer-focus-visible:ring-offset-black" />
-              <span className="pointer-events-none absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white transition-transform peer-checked:translate-x-5" />
+              <span className="sb-toggle-track h-6 w-11 rounded-full bg-white/15 transition-colors peer-checked:bg-accent peer-focus-visible:outline-none peer-focus-visible:ring-2 peer-focus-visible:ring-accent peer-focus-visible:ring-offset-2 peer-focus-visible:ring-offset-black" />
+              <span className="sb-toggle-thumb pointer-events-none absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white transition-transform peer-checked:translate-x-5" />
             </span>
             <span className="text-sm text-white">Auto-switch scenes from battle state</span>
           </label>
-          <p className="text-sm text-white/40">
+          <p className="text-sm text-white/50">
             Active match → Battle, champion crowned → Winner, otherwise → Intermission.
           </p>
         </div>

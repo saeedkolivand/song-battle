@@ -51,7 +51,10 @@ export function OverlayPage() {
                 Open in browser
               </Button>
             </div>
-            <p className="text-sm text-white/40">
+            <span className="sr-only" aria-live="polite">
+              {copied ? 'Overlay URL copied to clipboard' : ''}
+            </span>
+            <p className="text-sm text-white/50">
               Width/height 1920×1080, transparent background. The overlay reconnects automatically.
             </p>
           </div>

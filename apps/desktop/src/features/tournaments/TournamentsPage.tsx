@@ -47,7 +47,7 @@ export function TournamentsPage({ onNavigate }: PageProps) {
       <Section
         title="Saved battles"
         action={
-          <Button variant="primary" size="sm" onClick={() => onNavigate('battle')}>
+          <Button variant="primary" size="sm" onClick={() => onNavigate('battle')} aria-label="New battle">
             New
           </Button>
         }
@@ -80,7 +80,13 @@ export function TournamentsPage({ onNavigate }: PageProps) {
                     </div>
                   </div>
                   <BattlePill status={b.status} />
-                  <Button size="sm" variant="secondary" onClick={() => load(b.id)} disabled={pending || active}>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => load(b.id)}
+                    disabled={pending || active}
+                    aria-label={`Load ${b.title || 'Untitled'}`}
+                  >
                     Load
                   </Button>
                   <Button
