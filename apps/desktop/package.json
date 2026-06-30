@@ -8,6 +8,8 @@
     "build": "pnpm --filter @sb/overlay build && vite build",
     "typecheck": "tsc --noEmit",
     "preview": "vite preview",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "tauri": "tauri"
   },
   "dependencies": {
@@ -28,11 +30,17 @@
   "devDependencies": {
     "@tailwindcss/vite": "^4.0.0",
     "@tauri-apps/cli": "^2",
+    "@testing-library/dom": "^10.4.0",
+    "@testing-library/jest-dom": "^6.6.3",
+    "@testing-library/react": "^16.3.0",
+    "@testing-library/user-event": "^14.6.1",
     "@types/react": "^19.1.8",
     "@types/react-dom": "^19.1.6",
     "@vitejs/plugin-react": "^4.6.0",
+    "jsdom": "^26.1.0",
     "tailwindcss": "^4.0.0",
     "typescript": "~5.8.3",
-    "vite": "^7.0.4"
+    "vite": "^7.0.4",
+    "vitest": "^3.2.4"
   }
 }

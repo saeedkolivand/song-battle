@@ -6,10 +6,10 @@ export function Sidebar({ current, onNavigate }: { current: PageId; onNavigate: 
   const kickState = useBattleStore((s) => s.snapshot?.kick.state ?? 'disconnected');
 
   return (
-    <nav aria-label="Primary" className="flex h-screen w-56 shrink-0 flex-col border-r border-white/10 bg-black/40 p-3">
+    <nav aria-label="Primary navigation" className="flex h-screen w-56 shrink-0 flex-col border-r border-white/10 bg-black/40 p-3">
       <div className="px-3 py-4">
         <div className="text-sm font-black tracking-tight text-white">Song Battle</div>
-        <div className="text-xs text-white/40">Kick edition</div>
+        <div className="text-xs text-white/50">Kick edition</div>
       </div>
 
       <ul className="flex flex-1 flex-col gap-0.5">
@@ -41,7 +41,7 @@ export function Sidebar({ current, onNavigate }: { current: PageId; onNavigate: 
           <span className={`h-2 w-2 rounded-full ${live ? 'bg-emerald-400' : 'bg-amber-400'}`} aria-hidden="true" />
           {live ? 'backend live' : 'connecting…'}
         </span>
-        <span className="text-white/40">kick: {kickState}</span>
+        <span className="text-white/50">kick: {kickState}</span>
       </div>
     </nav>
   );

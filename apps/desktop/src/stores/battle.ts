@@ -14,14 +14,25 @@ interface BattleState {
   apply: (s: Snapshot) => void;
 }
 
+/**
+ * Pure seq-drop reducer: returns the snapshot to keep. A newer `seq` replaces the
+ * previous one; a stale OR duplicate (equal) `seq` is dropped — returns `prev`
+ * unchanged so the store can skip a redundant render.
+ */
+export function applySnapshot(prev: Snapshot | null, next: Snapshot): Snapshot {
+  if (prev && next.seq <= prev.seq) return prev;
+  return next;
+}
+
 export const useBattleStore = create<BattleState>((set, get) => ({
   snapshot: null,
   live: false,
   error: null,
   apply: (s) => {
     const cur = get().snapshot;
-    if (cur && s.seq < cur.seq) return; // stale frame — ignore
-    set({ snapshot: s, live: true, error: null });
+    const kept = applySnapshot(cur, s);
+    if (kept === cur) return; // stale/duplicate frame — no state change
+    set({ snapshot: kept, live: true, error: null });
   },
 }));
 

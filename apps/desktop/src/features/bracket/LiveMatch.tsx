@@ -49,7 +49,7 @@ export function LiveMatch({ match, anonymous = false }: { match: MatchView; anon
   return (
     <div className="flex flex-col gap-5">
       <div className="flex items-center justify-between">
-        <span className="text-xs uppercase tracking-wider text-white/40">Round {match.round}</span>
+        <span className="text-xs uppercase tracking-wider text-white/50">Round {match.round}</span>
         <div className="flex items-center gap-3">
           {match.bestOf > 1 ? (
             <SeriesScore winsA={match.winsA} winsB={match.winsB} bestOf={match.bestOf} />
@@ -89,7 +89,7 @@ export function LiveMatch({ match, anonymous = false }: { match: MatchView; anon
             {mmss(timer.remainingSec)}
           </span>
         ) : (
-          <span className="text-white/40">no timer</span>
+          <span className="text-white/50">no timer</span>
         )}
       </div>
     </div>

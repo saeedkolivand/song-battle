@@ -3,7 +3,20 @@ import tseslint from 'typescript-eslint';
 import reactHooks from 'eslint-plugin-react-hooks';
 
 export default tseslint.config(
-  { ignores: ['**/dist/**', '**/target/**', '**/*.gen.ts', '**/.codegraph/**'] },
+  {
+    ignores: [
+      '**/dist/**',
+      '**/target/**',
+      '**/*.gen.ts',
+      '**/.codegraph/**',
+      '.claude/**', // tooling scripts (Node env), not app source
+      '**/*.cjs',
+      '**/*.config.ts', // vite/vitest configs (Node globals)
+      '**/*.config.js',
+      '**/*.config.mjs',
+      'eslint.config.js',
+    ],
+  },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {

@@ -1,0 +1,36 @@
+# cargo-deny config (schema v2). Run: cargo deny check
+[advisories]
+version = 2
+yanked = "deny"
+# Only flag unmaintained crates we directly depend on — transitive ones deep in the
+# Tauri tree (e.g. unic-ucd via urlpattern, RUSTSEC-2025-0098) have no available fix.
+unmaintained = "workspace"
+# ignore = []  # add advisory IDs here only with a justification
+
+[licenses]
+version = 2
+confidence-threshold = 0.9
+# Skip our own unpublished app crate (no license field, never published).
+private = { ignore = true }
+allow = [
+  "MIT",
+  "Apache-2.0",
+  "Apache-2.0 WITH LLVM-exception",
+  "BSD-2-Clause",
+  "BSD-3-Clause",
+  "ISC",
+  "Zlib",
+  "MPL-2.0",
+  "Unicode-3.0",
+  "Unicode-DFS-2016",
+  "CC0-1.0",
+  "CDLA-Permissive-2.0",
+]
+
+[bans]
+multiple-versions = "warn"
+wildcards = "warn"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
