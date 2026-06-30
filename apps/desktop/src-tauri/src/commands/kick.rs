@@ -15,7 +15,11 @@ const EVENT_CHANNEL_CAP: usize = 1024;
 const SUBMIT_FETCH_CONCURRENCY: usize = 6;
 
 #[tauri::command]
-pub async fn connect_kick(channel: String, state: State<'_, AppState>) -> AppResult<()> {
+pub async fn connect_kick(
+    channel: String,
+    chatroom_id: Option<i64>,
+    state: State<'_, AppState>,
+) -> AppResult<()> {
     validate_channel(&channel)?; // reject bad slugs before spawning anything
     state.stop_kick(); // drop any previous connection
     state.clear_submit_ledger(); // fresh per-user submit quotas this session
@@ -23,7 +27,7 @@ pub async fn connect_kick(channel: String, state: State<'_, AppState>) -> AppRes
     state.mark_dirty();
 
     let (tx, mut rx) = tokio::sync::mpsc::channel::<ProviderEvent>(EVENT_CHANNEL_CAP);
-    let provider = KickProvider::new(channel);
+    let provider = KickProvider::new(channel, chatroom_id);
     let run = tokio::spawn(async move {
         let _ = provider.run(tx).await;
     });
