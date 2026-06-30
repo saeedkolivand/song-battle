@@ -66,13 +66,14 @@ packages/ui     @sb/ui     — runtime-agnostic presentational components
 
 ```bash
 pnpm install
-pnpm --filter @sb/overlay build   # build the overlay once — it's embedded at Rust compile time
-pnpm desktop                      # = pnpm --filter @sb/desktop tauri dev
+pnpm dev   # builds the overlay, compiles the Rust backend, and opens the desktop app window
 ```
 
-The dashboard shows the overlay URL and lets you create a battle, add songs, connect Kick, and run matchups.
-While iterating on the overlay UI, run `pnpm --filter @sb/overlay dev` (port 5174) and point a browser there;
-live data still comes from the desktop app's WebSocket.
+`pnpm dev` opens the native **Tauri app window** — that's the actual app. The dashboard needs the Tauri
+runtime, so opening `http://localhost:1420` in a plain web browser only shows a "use the desktop app"
+notice (`invoke` / event IPC exist only inside the app window). For browser-only frontend iteration use
+`pnpm web`. While iterating on the overlay UI, run `pnpm --filter @sb/overlay dev` (port 5174) and point a
+browser/OBS there; live data still comes from the desktop app's WebSocket.
 
 Other scripts: `pnpm build` (all), `pnpm typecheck`, `pnpm lint`, `pnpm test`, `pnpm format`.
 
@@ -87,6 +88,7 @@ Produces a native installer; `beforeBuildCommand` rebuilds the overlay first so 
 ## OBS setup
 
 **Overlay (browser source):**
+
 1. Run the app and copy the overlay URL from the dashboard (default `http://localhost:31337/`).
 2. In OBS, add a **Browser Source** with that URL, sized to your canvas (1080p / 1440p / 4K all scale).
 3. The background is transparent and it connects automatically — no extra config.
