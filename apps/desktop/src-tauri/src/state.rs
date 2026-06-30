@@ -7,9 +7,12 @@ use crate::db;
 use crate::domain::{
     battle::Battle,
     snapshot::{battle_view, ConnectionState, KickView, SavedBattle, Settings, Snapshot},
+    song::{MediaMetadata, Song, Source},
+    submit::{self, SubmitLedger},
     vote::VoteChoice,
 };
 use crate::error::{AppError, AppResult};
+use uuid::Uuid;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
@@ -23,6 +26,8 @@ pub struct App {
     pub battle: Option<Battle>,
     pub kick: KickConn,
     pub settings: Settings,
+    /// RAM-only anti-flood ledger for chat `!submit` (cleared between sessions).
+    pub submit_ledger: SubmitLedger,
 }
 
 pub struct KickConn {
@@ -143,6 +148,75 @@ impl AppState {
             .await?;
         self.inner.write().unwrap().settings.default_timer_sec = sec;
         Ok(())
+    }
+
+    pub async fn set_chat_submissions(&self, enabled: bool) -> AppResult<()> {
+        self.write_db(move |conn| db::set_chat_submissions(conn, enabled))
+            .await?;
+        self.inner.write().unwrap().settings.chat_submissions = enabled;
+        Ok(())
+    }
+
+    // ── chat song submissions ────────────────────────────────────────────────
+    /// Synchronous anti-flood gate (runs under the lock to close the TOCTOU).
+    /// `Some((source, url))` → spawn the oEmbed fetch; the ledger is already bumped.
+    pub fn gate_submission(
+        &self,
+        user_id: &str,
+        raw_url: &str,
+        now_ms: u64,
+    ) -> Option<(Source, String)> {
+        let mut guard = self.inner.write().unwrap();
+        let App {
+            settings,
+            battle,
+            submit_ledger,
+            ..
+        } = &mut *guard;
+        submit::evaluate(
+            settings.chat_submissions,
+            battle.as_ref(),
+            submit_ledger,
+            user_id,
+            raw_url,
+            now_ms,
+        )
+    }
+
+    /// Append a resolved submission to the lobby, then persist. Called off the chat
+    /// loop after the fetch succeeds. Re-asserts BOTH invariants under the lock —
+    /// still a lobby (no bracket) AND under the cap — because the gate's checks were
+    /// synchronous but the oEmbed fetch raced; without the cap re-check a distinct-
+    /// userId burst overshoots GLOBAL_SONG_CAP (and triggers O(n^2) DB rewrites).
+    pub async fn add_submitted_song(&self, meta: MediaMetadata, submitter: String) {
+        let added = {
+            let mut app = self.inner.write().unwrap();
+            match app.battle.as_mut() {
+                Some(b) if submit::lobby_open(b) => {
+                    b.add_song(Song {
+                        id: Uuid::new_v4().to_string(),
+                        title: meta.title,
+                        artist: meta.artist,
+                        thumbnail: meta.thumbnail,
+                        duration_sec: meta.duration_sec,
+                        source: meta.source,
+                        source_url: meta.source_url,
+                        // Clamp the (untrusted) chat name before it's stored/broadcast.
+                        submitter: Some(submitter.chars().take(40).collect()),
+                        metadata: None,
+                    });
+                    true
+                }
+                _ => false, // bracket started / cap reached in the meantime → drop
+            }
+        };
+        if added {
+            self.persist().await;
+        }
+    }
+
+    pub fn clear_submit_ledger(&self) {
+        self.inner.write().unwrap().submit_ledger.clear();
     }
 
     // ── saved tournaments ────────────────────────────────────────────────────

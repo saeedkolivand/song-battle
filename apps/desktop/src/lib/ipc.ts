@@ -40,6 +40,7 @@ export const ipc = {
   getSettings: () => invoke<AppSettings>('get_settings'),
   setAnonymous: (anonymous: boolean) => invoke<void>('set_anonymous', { anonymous }),
   setDefaultTimer: (sec: number) => invoke<void>('set_default_timer', { sec }),
+  setChatSubmissions: (enabled: boolean) => invoke<void>('set_chat_submissions', { enabled }),
 
   overlayUrl: () => invoke<string>('overlay_url'),
   openOverlayWindow: () => invoke<void>('open_overlay_window'),

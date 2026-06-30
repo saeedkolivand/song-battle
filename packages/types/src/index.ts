@@ -137,6 +137,7 @@ export type VoteChoice = 'a' | 'b';
 export interface Settings {
   anonymous: boolean;
   defaultTimerSec: number;
+  chatSubmissions: boolean; // allow viewers to add songs via !submit <url> (lobby only)
 }
 
 // Summary row for the saved-tournaments list (list_battles command).

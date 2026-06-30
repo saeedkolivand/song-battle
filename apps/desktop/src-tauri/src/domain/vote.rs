@@ -19,20 +19,25 @@ pub fn parse_vote(text: &str) -> Option<VoteChoice> {
     }
 }
 
-/// What a chat message resolves to, given the sender's mod status. Mod-only
-/// control commands (`!reset`/`!resetvotes`, `!skip`) take precedence; otherwise
-/// it's a vote or ignored. Non-mods' control commands fall through to `Ignore`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// What a chat message resolves to. `Submit` (`!submit`/`!add <url>`) is open to
+/// anyone; the mod-only control commands (`!reset`/`!resetvotes`, `!skip`) take
+/// precedence over voting. Everything else is a vote or `Ignore`.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ChatAction {
     Vote(VoteChoice),
+    Submit(String),
     ResetVotes,
     Skip,
     Ignore,
 }
 
 pub fn classify_chat(is_mod: bool, text: &str) -> ChatAction {
+    let trimmed = text.trim();
+    if let Some(url) = parse_submit(trimmed) {
+        return ChatAction::Submit(url); // anyone may submit
+    }
     if is_mod {
-        match text.trim().to_ascii_lowercase().as_str() {
+        match trimmed.to_ascii_lowercase().as_str() {
             "!reset" | "!resetvotes" => return ChatAction::ResetVotes,
             "!skip" => return ChatAction::Skip,
             _ => {}
@@ -42,6 +47,18 @@ pub fn classify_chat(is_mod: bool, text: &str) -> ChatAction {
         Some(c) => ChatAction::Vote(c),
         None => ChatAction::Ignore,
     }
+}
+
+/// `!submit <url>` / `!add <url>` → the raw URL (first token after the command).
+/// Command match is case-insensitive; the URL's case is preserved.
+fn parse_submit(trimmed: &str) -> Option<String> {
+    let mut parts = trimmed.splitn(2, char::is_whitespace);
+    let cmd = parts.next()?;
+    if !cmd.eq_ignore_ascii_case("!submit") && !cmd.eq_ignore_ascii_case("!add") {
+        return None;
+    }
+    let url = parts.next()?.split_whitespace().next()?;
+    Some(url.to_string())
 }
 
 /// Integer percentage 0..=100 (floored). `total == 0` → 0.
@@ -154,5 +171,28 @@ mod tests {
         assert_eq!(classify_chat(true, "2"), ChatAction::Vote(VoteChoice::B));
         // junk is ignored
         assert_eq!(classify_chat(true, "hello"), ChatAction::Ignore);
+    }
+
+    #[test]
+    fn classify_chat_submit_parsing() {
+        let u = "https://youtu.be/AbC";
+        // anyone may submit; both verbs; URL case preserved
+        assert_eq!(
+            classify_chat(false, &format!("!submit {u}")),
+            ChatAction::Submit(u.into())
+        );
+        assert_eq!(
+            classify_chat(true, &format!("!ADD {u}")),
+            ChatAction::Submit(u.into())
+        );
+        // surrounding whitespace + extra tokens after the URL
+        assert_eq!(
+            classify_chat(false, &format!("  !submit   {u}  trailing")),
+            ChatAction::Submit(u.into())
+        );
+        // not the command, missing url → not a submit
+        assert_eq!(classify_chat(false, "!submitx https://x"), ChatAction::Ignore);
+        assert_eq!(classify_chat(false, "!submit"), ChatAction::Ignore);
+        assert_eq!(classify_chat(false, "!add"), ChatAction::Ignore);
     }
 }

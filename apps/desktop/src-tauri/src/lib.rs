@@ -115,6 +115,7 @@ pub fn run() {
             commands::settings::get_settings,
             commands::settings::set_anonymous,
             commands::settings::set_default_timer,
+            commands::settings::set_chat_submissions,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
