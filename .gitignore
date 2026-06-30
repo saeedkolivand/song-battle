@@ -1,0 +1,208 @@
+# ═══════════════════════════════════════════════════════════════════════════════
+# Kick Song Battle — .gitignore  (adapted from ai-job-hunter)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# ── Dependencies ───────────────────────────────────────────────────────────────
+node_modules/
+.pnp
+.pnp.js
+
+# ── Build outputs ──────────────────────────────────────────────────────────────
+dist/
+out/
+build/
+apps/desktop/dist/
+apps/overlay/dist/
+.vite/
+.turbo/
+storybook-static/
+
+# ── TypeScript ─────────────────────────────────────────────────────────────────
+*.tsbuildinfo
+*.d.ts.map
+
+# ── Packaged artifacts ─────────────────────────────────────────────────────────
+release-artifacts/
+*.dmg
+*.deb
+*.rpm
+*.AppImage
+*.snap
+*.pkg
+
+# ── Tauri / Rust ───────────────────────────────────────────────────────────────
+target/
+src-tauri/target/
+apps/desktop/src-tauri/target/
+apps/desktop/src-tauri/gen/
+
+# Tauri bundle outputs
+*.msi
+*.AppImage.tar.gz
+
+# Minisign / updater key files — NEVER commit private keys
+*.key
+*.key.pub
+
+# ── Logs ───────────────────────────────────────────────────────────────────────
+*.log
+*.log.*
+logs/
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# ── Environment variables ──────────────────────────────────────────────────────
+.env
+.env.local
+.env.*.local
+.env.development
+.env.production
+.env.test
+!.env.example
+!.env.*.example
+
+# ── Testing ────────────────────────────────────────────────────────────────────
+coverage/
+.nyc_output/
+playwright-report/
+playwright/.cache/
+test-results/
+vitest.config.*.timestamp-*
+
+# ── OS files ───────────────────────────────────────────────────────────────────
+# macOS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+.AppleDouble
+.LSOverride
+Icon
+
+# Windows
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+*.lnk
+
+# Linux
+*~
+.fuse_hidden*
+.directory
+.Trash-*
+
+# ── Editors & IDEs ─────────────────────────────────────────────────────────────
+# JetBrains
+.idea/
+*.iml
+*.iws
+*.ipr
+
+# VS Code — personal/machine-specific files only
+.vscode/launch.json
+.vscode/settings.json
+.vscode/*.code-workspace
+!.vscode/extensions.json
+!.vscode/tasks.json
+
+# Vim / Neovim
+*.swp
+*.swo
+Session.vim
+.netrwhist
+tags
+
+# Emacs
+\#*\#
+.\#*
+auto-save-list
+
+# Sublime Text
+*.sublime-workspace
+
+# Zed
+.zed/settings.json
+
+# ── Package managers ───────────────────────────────────────────────────────────
+.npm/
+.pnpm-store/
+.yarn/
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/sdks
+!.yarn/versions
+
+# ── Cache directories ──────────────────────────────────────────────────────────
+.cache/
+.eslintcache
+.stylelintcache
+.prettiercache
+
+# ── Secrets & credentials ──────────────────────────────────────────────────────
+*.pem
+*.p12
+*.pfx
+*.cert
+*.crt
+secrets/
+/credentials/
+*.mobileprovision
+
+# ── Database / local app data ──────────────────────────────────────────────────
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+
+# ── Temporary files ────────────────────────────────────────────────────────────
+tmp/
+temp/
+.tmp/
+*.tmp
+*.temp
+*.bak
+*.orig
+*.rej
+
+# ── AI tool — personal/machine-specific state ──────────────────────────────────
+.aider.chat.history.md
+.aider.input.history
+.cursor/mcp.json
+.continue/.sessions/
+/rtk/
+
+# Claude Code — the agent system (.claude/agents, skills, commands, hooks,
+# review-routes.json, settings.json) IS committed; personal/transient files are NOT:
+.claude/settings.local.json
+.claude/memory/
+.claude/.review-cache
+.claude/*.bak-ruflo
+.claude-flow*
+# Per-task handoff files are transient; the template is committed.
+.claude/scratch/*
+!.claude/scratch/HANDOFF_TEMPLATE.md
+
+# ── Code-intelligence (machine-local, regenerated) ─────────────────────────────
+.mcp.json
+graphify-out/
+.codegraph/
+.obsidian/
+
+# ── Misc ───────────────────────────────────────────────────────────────────────
+*.pid
+*.pid.lock
+*.seed
+
+.profraw
+.cargo
+target/llvm-cov/
+
+CLAUDE.local.md
