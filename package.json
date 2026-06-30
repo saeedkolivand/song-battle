@@ -5,14 +5,14 @@
   "type": "module",
   "packageManager": "pnpm@11.0.9",
   "scripts": {
-    "dev": "turbo run dev",
+    "dev": "pnpm --filter @sb/overlay build && pnpm --filter @sb/desktop tauri dev",
     "build": "turbo run build",
     "test": "turbo run test",
     "lint": "eslint .",
     "typecheck": "turbo run typecheck",
     "format": "prettier --write .",
-    "desktop": "pnpm --filter @ksb/desktop tauri dev",
-    "overlay:build": "pnpm --filter @ksb/overlay build"
+    "web": "turbo run dev",
+    "overlay:build": "pnpm --filter @sb/overlay build"
   },
   "devDependencies": {
     "@eslint/js": "^9.17.0",

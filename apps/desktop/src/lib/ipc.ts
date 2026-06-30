@@ -4,6 +4,10 @@ import type { Snapshot, SavedBattle, Settings, BattleMode } from '@sb/types';
 // Canonical type lives in @sb/types; alias kept for existing call sites.
 export type AppSettings = Settings;
 
+// True only inside the Tauri app window (it injects __TAURI_INTERNALS__). In a
+// plain browser there is no IPC, so invoke/listen would throw — guard UI on this.
+export const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
+
 // Typed wrappers over the Rust command surface. Command *names* are snake_case
 // (the Rust side); Tauri converts camelCase JS arg keys to snake_case params.
 // Mutations resolve to void — the resulting state arrives via the `snapshot`

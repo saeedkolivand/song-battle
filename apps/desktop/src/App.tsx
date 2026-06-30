@@ -6,6 +6,7 @@ import { applyAccent } from './lib/settings';
 import { useGlobalHotkeys } from './lib/useHotkeys';
 import { useObsAutoSwitch } from './features/obs/useObs';
 import { useDevRecorder } from './features/dev/useDevRecorder';
+import { isTauri } from './lib/ipc';
 
 export default function App() {
   const [page, setPage] = useState<PageId>('home');
@@ -18,6 +19,7 @@ export default function App() {
   // Sync with external systems: restore the saved accent token and subscribe to
   // the backend snapshot stream. Dispose the listener on unmount.
   useEffect(() => {
+    if (!isTauri) return; // browser preview — no Tauri IPC to stream from
     applyAccent();
     let dispose: (() => void) | undefined;
     let active = true;
@@ -41,6 +43,10 @@ export default function App() {
 
   const Page = pageComponent(page);
 
+  // The dashboard needs the Tauri runtime (invoke/listen). Opened in a plain
+  // browser it can't reach the backend — show how to launch the real app.
+  if (!isTauri) return <BrowserNotice />;
+
   return (
     <div className="flex h-screen overflow-hidden">
       <a
@@ -50,11 +56,35 @@ export default function App() {
         Skip to content
       </a>
       <Sidebar current={page} onNavigate={setPage} />
-      <main id="main-content" ref={mainRef} tabIndex={-1} className="flex-1 overflow-y-auto focus:outline-none">
+      <main
+        id="main-content"
+        ref={mainRef}
+        tabIndex={-1}
+        className="flex-1 overflow-y-auto focus:outline-none"
+      >
         <div className="mx-auto max-w-5xl px-8 py-8">
           <Page onNavigate={setPage} />
         </div>
       </main>
+    </div>
+  );
+}
+
+// Shown when the dashboard is opened in a web browser instead of the desktop app.
+function BrowserNotice() {
+  return (
+    <div className="flex h-screen items-center justify-center bg-[#0a0a0f] p-8 text-center text-white">
+      <div className="max-w-md">
+        <h1 className="text-2xl font-black">Open the Song Battle desktop app</h1>
+        <p className="mt-3 text-sm leading-relaxed text-white/60">
+          You&apos;re viewing the dashboard in a web browser, which can&apos;t reach the app&apos;s
+          backend (battles, voting, Kick, OBS). Launch the desktop window with{' '}
+          <code className="rounded bg-white/10 px-1.5 py-0.5 font-mono text-emerald-400">
+            pnpm dev
+          </code>{' '}
+          and use the window it opens.
+        </p>
+      </div>
     </div>
   );
 }
