@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Button, Field, Input, TextArea } from '@sb/ui';
+import { modeLabel } from '@sb/shared';
 import { useBattleStore } from '../../stores/battle';
 import { ipc } from '../../lib/ipc';
 import { useAction } from '../../lib/useAction';
@@ -53,6 +54,7 @@ export function BattlePage() {
             {battle.description ? <p className="mt-1 text-sm text-white/60">{battle.description}</p> : null}
           </div>
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <Stat label="Mode" value={modeLabel(battle.mode)} />
             <Stat label="Theme" value={battle.theme || '—'} />
             <Stat label="Songs" value={battle.songCount} />
             <Stat label="Round" value={`${battle.round} / ${battle.totalRounds}`} />

@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import type { Snapshot, SavedBattle, Settings } from '@sb/types';
+import type { Snapshot, SavedBattle, Settings, BattleMode } from '@sb/types';
 
 // Canonical type lives in @sb/types; alias kept for existing call sites.
 export type AppSettings = Settings;
@@ -19,7 +19,7 @@ export const ipc = {
   removeSong: (songId: string) => invoke<void>('remove_song', { songId }),
   shuffleSongs: () => invoke<void>('shuffle_songs'),
 
-  generateBracket: () => invoke<void>('generate_bracket'),
+  generateBracket: (mode: BattleMode) => invoke<void>('generate_bracket', { mode }),
   startMatch: () => invoke<void>('start_match'),
   resetVotes: () => invoke<void>('reset_votes'),
   skipMatch: () => invoke<void>('skip_match'),

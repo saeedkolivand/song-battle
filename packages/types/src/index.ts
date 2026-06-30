@@ -70,6 +70,13 @@ export interface ProviderDescriptor {
 export type MatchState = 'pending' | 'active' | 'done';
 export type BattleStatus = 'idle' | 'running' | 'finished';
 
+// Tournament structure. 'single' = single-elim (bestOf 1); 'double' = double-elim
+// (winners/losers/grand brackets, bestOf 1); 'bo3' = single-elim, each match best-of-3.
+export type BattleMode = 'single' | 'double' | 'bo3';
+
+// Which sub-bracket a match belongs to. 'main' for single-elim/bo3; the rest for double-elim.
+export type MatchGroup = 'main' | 'winners' | 'losers' | 'grand';
+
 export interface TimerView {
   durationSec: number;
   remainingSec: number;
@@ -89,6 +96,10 @@ export interface MatchView {
   state: MatchState;
   winner: 'a' | 'b' | null;
   timer: TimerView | null; // present while active
+  group: MatchGroup; // double-elim sub-bracket; 'main' otherwise
+  bestOf: number; // 1, or 3 for bo3 mode
+  winsA: number; // games won in the series (a)
+  winsB: number; // games won in the series (b)
 }
 
 export interface BattleView {
@@ -96,6 +107,7 @@ export interface BattleView {
   title: string;
   description: string;
   theme: string;
+  mode: BattleMode;
   status: BattleStatus;
   round: number; // current round, 1-based
   totalRounds: number;
