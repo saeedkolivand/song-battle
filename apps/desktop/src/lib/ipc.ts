@@ -18,6 +18,7 @@ export const ipc = {
     invoke<void>('import_song', { url, submitter: submitter ?? null }),
   removeSong: (songId: string) => invoke<void>('remove_song', { songId }),
   shuffleSongs: () => invoke<void>('shuffle_songs'),
+  reorderSongs: (orderedIds: string[]) => invoke<void>('reorder_songs', { orderedIds }),
 
   generateBracket: (mode: BattleMode) => invoke<void>('generate_bracket', { mode }),
   startMatch: () => invoke<void>('start_match'),
