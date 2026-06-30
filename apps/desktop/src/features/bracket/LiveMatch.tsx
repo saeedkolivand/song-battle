@@ -1,6 +1,6 @@
 import type { MatchView, Song } from '@sb/types';
 import { mmss } from '@sb/shared';
-import { MatchPill, Pill } from '../../components/common';
+import { MatchPill, Pill, SeriesScore } from '../../components/common';
 
 function slotName(song: Song | null, fallback: string): string {
   return song?.title ?? fallback;
@@ -50,7 +50,10 @@ export function LiveMatch({ match, anonymous = false }: { match: MatchView; anon
     <div className="flex flex-col gap-5">
       <div className="flex items-center justify-between">
         <span className="text-xs uppercase tracking-wider text-white/40">Round {match.round}</span>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-3">
+          {match.bestOf > 1 ? (
+            <SeriesScore winsA={match.winsA} winsB={match.winsB} bestOf={match.bestOf} />
+          ) : null}
           {anonymous ? <Pill tone="idle">anonymous</Pill> : null}
           <MatchPill state={match.state} />
         </div>

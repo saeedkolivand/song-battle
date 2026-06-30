@@ -115,6 +115,7 @@ impl AppState {
 
     pub fn import_json(&self, json: &str) -> AppResult<()> {
         let mut battle: Battle = serde_json::from_str(json)?;
+        battle.rewire(); // recompute routing + fill flags (skipped in serde)
         battle.normalize(); // untrusted boundary: clamp out-of-range `current`
         self.set_battle(battle);
         Ok(())

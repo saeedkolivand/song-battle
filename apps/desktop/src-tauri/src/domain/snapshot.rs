@@ -2,8 +2,8 @@
 //! project the battle aggregate into a `Snapshot`.
 
 use crate::domain::{
-    battle::{Battle, BattleStatus},
-    bracket::{Match, MatchState},
+    battle::{Battle, BattleMode, BattleStatus},
+    bracket::{Match, MatchGroup, MatchState},
     song::Song,
     vote::{self, VoteChoice},
 };
@@ -42,6 +42,10 @@ pub struct MatchView {
     pub state: MatchState,
     pub winner: Option<VoteChoice>,
     pub timer: Option<TimerView>,
+    pub group: MatchGroup,
+    pub best_of: u32,
+    pub wins_a: u32,
+    pub wins_b: u32,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -51,6 +55,7 @@ pub struct BattleView {
     pub title: String,
     pub description: String,
     pub theme: String,
+    pub mode: BattleMode,
     pub status: BattleStatus,
     pub round: u32,
     pub total_rounds: u32,
@@ -128,6 +133,10 @@ fn match_view(m: &Match) -> MatchView {
         state: m.state,
         winner: m.winner,
         timer,
+        group: m.group,
+        best_of: m.best_of,
+        wins_a: m.wins_a,
+        wins_b: m.wins_b,
     }
 }
 
@@ -167,6 +176,7 @@ pub fn battle_view(b: &Battle, anonymous: bool) -> BattleView {
         title: b.title.clone(),
         description: b.description.clone(),
         theme: b.theme.clone(),
+        mode: b.mode,
         status: b.status,
         round,
         total_rounds: b.total_rounds,

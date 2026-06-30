@@ -83,6 +83,32 @@ export function MatchPill({ state }: { state: MatchState }) {
   return <Pill tone={matchTone[state]}>{state}</Pill>;
 }
 
+function Pips({ filled, total, fillClass }: { filled: number; total: number; fillClass: string }) {
+  return (
+    <span className="inline-flex gap-0.5" aria-hidden="true">
+      {Array.from({ length: total }, (_, i) => (
+        <span key={i} className={`h-2 w-2 rounded-full ${i < filled ? fillClass : 'bg-white/20'}`} />
+      ))}
+    </span>
+  );
+}
+
+// Series score for best-of matches: win pips per side + the wins tally. Returns
+// null for single games (bestOf 1) so callers can render it unconditionally.
+export function SeriesScore({ winsA, winsB, bestOf }: { winsA: number; winsB: number; bestOf: number }) {
+  if (bestOf <= 1) return null;
+  const need = Math.floor(bestOf / 2) + 1;
+  return (
+    <span className="inline-flex items-center gap-2" aria-label={`Series score ${winsA} to ${winsB}, best of ${bestOf}`}>
+      <Pips filled={winsA} total={need} fillClass="bg-accent" />
+      <span className="text-xs font-semibold tabular-nums text-white/80">
+        {winsA}–{winsB}
+      </span>
+      <Pips filled={winsB} total={need} fillClass="bg-sky-400" />
+    </span>
+  );
+}
+
 export function ErrorNote({ message }: { message: string | null }) {
   if (!message) return null;
   return (

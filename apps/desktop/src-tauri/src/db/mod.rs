@@ -4,8 +4,8 @@
 //! are not persisted; an `active` match reloads as `pending` for a clean restart.
 
 use crate::domain::{
-    battle::{Battle, BattleStatus},
-    bracket::{Match, MatchState},
+    battle::{Battle, BattleMode, BattleStatus},
+    bracket::{Match, MatchGroup, MatchState},
     snapshot::{SavedBattle, Settings},
     song::{Song, Source},
     timer::Timer,
@@ -44,9 +44,23 @@ CREATE TABLE settings (
 );
 INSERT INTO settings (id, anonymous, default_timer_sec) VALUES (1, 0, 30);
 ";
+// Phase 3: tournament modes. `mode` on battles; group/series fields on matches.
+// (`match_group` avoids the `group` SQL keyword.) Routing is recomputed on load.
+const M4_MODES: &str = "
+ALTER TABLE battles ADD COLUMN mode TEXT NOT NULL DEFAULT 'single';
+ALTER TABLE matches ADD COLUMN match_group TEXT NOT NULL DEFAULT 'main';
+ALTER TABLE matches ADD COLUMN best_of INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE matches ADD COLUMN wins_a INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE matches ADD COLUMN wins_b INTEGER NOT NULL DEFAULT 0;
+";
 
 fn migrations() -> Migrations<'static> {
-    Migrations::new(vec![M::up(SCHEMA), M::up(M2_UPDATED_AT), M::up(M3_SETTINGS)])
+    Migrations::new(vec![
+        M::up(SCHEMA),
+        M::up(M2_UPDATED_AT),
+        M::up(M3_SETTINGS),
+        M::up(M4_MODES),
+    ])
 }
 
 /// Unix time in ms (used for the battles `updated_at` column).
@@ -74,11 +88,11 @@ pub fn save_battle(conn: &Connection, b: &Battle) -> AppResult<()> {
     let tx = conn.unchecked_transaction()?;
     tx.execute(
         "INSERT OR REPLACE INTO battles
-         (id,title,description,theme,status,total_rounds,duration_sec,winner_song_id,current_idx,created_at,updated_at)
-         VALUES (?,?,?,?,?,?,?,?,?,
+         (id,title,description,theme,mode,status,total_rounds,duration_sec,winner_song_id,current_idx,created_at,updated_at)
+         VALUES (?,?,?,?,?,?,?,?,?,?,
             COALESCE((SELECT created_at FROM battles WHERE id=?), strftime('%s','now')), ?)",
         params![
-            b.id, b.title, b.description, b.theme,
+            b.id, b.title, b.description, b.theme, mode_str(b.mode),
             status_str(b.status), b.total_rounds, b.duration_sec,
             b.winner.as_ref().map(|s| &s.id),
             b.current.map(|c| c as i64),
@@ -100,14 +114,16 @@ pub fn save_battle(conn: &Connection, b: &Battle) -> AppResult<()> {
     tx.execute("DELETE FROM matches WHERE battle_id=?", params![b.id])?;
     for m in &b.matches {
         tx.execute(
-            "INSERT INTO matches (id,battle_id,round,idx,a_song_id,b_song_id,winner,state)
-             VALUES (?,?,?,?,?,?,?,?)",
+            "INSERT INTO matches
+             (id,battle_id,round,idx,a_song_id,b_song_id,winner,state,match_group,best_of,wins_a,wins_b)
+             VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
             params![
                 m.id, b.id, m.round, m.idx,
                 m.a.as_ref().map(|s| &s.id),
                 m.b.as_ref().map(|s| &s.id),
                 winner_str(m.winner),
-                state_str(m.state)
+                state_str(m.state),
+                group_str(m.group), m.best_of, m.wins_a, m.wins_b
             ],
         )?;
     }
@@ -194,7 +210,7 @@ pub fn load_latest(conn: &Connection) -> AppResult<Option<Battle>> {
 pub fn load_battle(conn: &Connection, id: &str) -> AppResult<Option<Battle>> {
     let row = conn
         .query_row(
-            "SELECT id,title,description,theme,status,total_rounds,duration_sec,winner_song_id,current_idx
+            "SELECT id,title,description,theme,mode,status,total_rounds,duration_sec,winner_song_id,current_idx
              FROM battles WHERE id=?",
             params![id],
             |r| {
@@ -204,15 +220,16 @@ pub fn load_battle(conn: &Connection, id: &str) -> AppResult<Option<Battle>> {
                     r.get::<_, String>(2)?,
                     r.get::<_, String>(3)?,
                     r.get::<_, String>(4)?,
-                    r.get::<_, u32>(5)?,
+                    r.get::<_, String>(5)?,
                     r.get::<_, u32>(6)?,
-                    r.get::<_, Option<String>>(7)?,
-                    r.get::<_, Option<i64>>(8)?,
+                    r.get::<_, u32>(7)?,
+                    r.get::<_, Option<String>>(8)?,
+                    r.get::<_, Option<i64>>(9)?,
                 ))
             },
         )
         .optional()?;
-    let Some((id, title, description, theme, status, total_rounds, duration_sec, winner_id, current_idx)) =
+    let Some((id, title, description, theme, mode, status, total_rounds, duration_sec, winner_id, current_idx)) =
         row
     else {
         return Ok(None);
@@ -228,6 +245,7 @@ pub fn load_battle(conn: &Connection, id: &str) -> AppResult<Option<Battle>> {
         title,
         description,
         theme,
+        mode: mode_from(&mode),
         status: status_from(&status),
         songs,
         matches,
@@ -236,6 +254,7 @@ pub fn load_battle(conn: &Connection, id: &str) -> AppResult<Option<Battle>> {
         winner,
         duration_sec,
     };
+    battle.rewire(); // recompute routing + fill flags (not persisted)
     battle.normalize(); // untrusted boundary: clamp out-of-range `current`
     Ok(Some(battle))
 }
@@ -267,9 +286,13 @@ fn load_matches(
     by_id: &HashMap<&str, &Song>,
     duration_sec: u32,
 ) -> AppResult<Vec<Match>> {
+    // Order MUST mirror generate_double's build order (all winners/main, then losers,
+    // then grand; each by round, idx) — `current` is a persisted positional index into
+    // this vector, so a different load order would point it at the wrong match.
     let mut stmt = conn.prepare(
-        "SELECT id,round,idx,a_song_id,b_song_id,winner,state
-         FROM matches WHERE battle_id=? ORDER BY round, idx",
+        "SELECT id,round,idx,a_song_id,b_song_id,winner,state,match_group,best_of,wins_a,wins_b
+         FROM matches WHERE battle_id=?
+         ORDER BY CASE match_group WHEN 'losers' THEN 1 WHEN 'grand' THEN 2 ELSE 0 END, round, idx",
     )?;
     let rows = stmt.query_map(params![battle_id], |r| {
         let a_id: Option<String> = r.get(3)?;
@@ -284,6 +307,7 @@ fn load_matches(
         };
         Ok(Match {
             id: r.get(0)?,
+            group: group_from(&r.get::<_, String>(7)?),
             round: r.get(1)?,
             idx: r.get(2)?,
             a: a_id.and_then(|i| by_id.get(i.as_str()).map(|s| (*s).clone())),
@@ -292,6 +316,14 @@ fn load_matches(
             state,
             winner: winner_from(winner.as_deref()),
             timer: Timer::new(duration_sec),
+            best_of: r.get(8)?,
+            wins_a: r.get(9)?,
+            wins_b: r.get(10)?,
+            // recomputed by Battle::rewire after the whole battle is built
+            win_to: None,
+            lose_to: None,
+            a_filled: false,
+            b_filled: false,
         })
     })?;
     Ok(rows.collect::<Result<Vec<_>, _>>()?)
@@ -324,6 +356,36 @@ fn status_from(s: &str) -> BattleStatus {
         "running" => BattleStatus::Running,
         "finished" => BattleStatus::Finished,
         _ => BattleStatus::Idle,
+    }
+}
+fn mode_str(m: BattleMode) -> &'static str {
+    match m {
+        BattleMode::Single => "single",
+        BattleMode::Double => "double",
+        BattleMode::Bo3 => "bo3",
+    }
+}
+fn mode_from(s: &str) -> BattleMode {
+    match s {
+        "double" => BattleMode::Double,
+        "bo3" => BattleMode::Bo3,
+        _ => BattleMode::Single,
+    }
+}
+fn group_str(g: MatchGroup) -> &'static str {
+    match g {
+        MatchGroup::Main => "main",
+        MatchGroup::Winners => "winners",
+        MatchGroup::Losers => "losers",
+        MatchGroup::Grand => "grand",
+    }
+}
+fn group_from(s: &str) -> MatchGroup {
+    match s {
+        "winners" => MatchGroup::Winners,
+        "losers" => MatchGroup::Losers,
+        "grand" => MatchGroup::Grand,
+        _ => MatchGroup::Main,
     }
 }
 fn state_str(s: MatchState) -> &'static str {
@@ -373,7 +435,7 @@ mod tests {
                 metadata: None,
             });
         }
-        b.generate_bracket().unwrap();
+        b.generate_bracket(BattleMode::Single).unwrap();
         b
     }
 
@@ -473,5 +535,128 @@ mod tests {
         let s = get_settings(&conn).unwrap();
         assert!(s.anonymous);
         assert_eq!(s.default_timer_sec, 45);
+    }
+
+    /// REGRESSION for the CRITICAL load-ordering bug fixed in load_matches.
+    ///
+    /// The bug: without `ORDER BY CASE match_group …` the DB returned matches
+    /// ordered by (round, idx) only, which interleaved Winners / Losers / Grand
+    /// rows and produced a different positional vector than generate_double builds.
+    /// A saved `current_idx = 2` would point at the wrong match (Grand-r1 or
+    /// LB-r1) instead of WB-r2 after reload.
+    ///
+    /// The fix: ORDER BY CASE …group… END, round, idx mirrors generate order
+    /// exactly. This test saves a mid-tournament 4-song double-elim battle with
+    /// current pointing to WB-r2 (index 2), reloads it, and asserts:
+    ///   • the loaded `current` index is still 2
+    ///   • the match at index 2 has the same ID as before (not LB-r1 or Grand-r1)
+    ///   • start_match() activates that exact match (correct first_playable)
+    #[test]
+    fn double_elim_reload_preserves_current_mid_tourney() {
+        let conn = open_in_memory().unwrap();
+
+        // Build a 4-song double-elim battle (timer=2s so two ticks expire it).
+        let mut b = Battle::new("reload-test".into(), "d".into(), "th".into());
+        for i in 0..4_u32 {
+            b.add_song(Song {
+                id: format!("s{i}"),
+                title: format!("song {i}"),
+                artist: None,
+                thumbnail: None,
+                duration_sec: None,
+                source: Source::Youtube,
+                source_url: format!("https://x/{i}"),
+                submitter: None,
+                metadata: None,
+            });
+        }
+        b.set_timer(2);
+        b.generate_bracket(BattleMode::Double).unwrap();
+
+        // generate order for 4-song double-elim:
+        //   idx 0: Winners r1 idx0 (s0 vs s3)
+        //   idx 1: Winners r1 idx1 (s1 vs s2)
+        //   idx 2: Winners r2 idx0  ← target current after two WB-r1 matches
+        //   idx 3: Losers  r1 idx0
+        //   idx 4: Losers  r2 idx0
+        //   idx 5: Grand   r1 idx0
+        //   idx 6: Grand   r2 idx0
+
+        // Play WB-r1-idx0: A wins → s0 to WB-r2 slot-a, s3 to LB-r1 slot-a.
+        b.start_match().unwrap();
+        assert_eq!(b.current, Some(0));
+        b.cast_vote("u1".into(), VoteChoice::A, 1_000);
+        b.tick();
+        b.tick(); // 2s timer expires → match resolves
+        assert_eq!(b.matches[0].state, MatchState::Done);
+
+        // Play WB-r1-idx1: A wins → s1 to WB-r2 slot-b, s2 to LB-r1 slot-b.
+        b.start_match().unwrap();
+        assert_eq!(b.current, Some(1));
+        b.cast_vote("u2".into(), VoteChoice::A, 2_000);
+        b.tick();
+        b.tick();
+        assert_eq!(b.matches[1].state, MatchState::Done);
+
+        // Both WB-r2 slots are filled; LB-r1 is also ready, but WB-r2 is earlier
+        // in the vector → first_playable = 2 = WB-r2.
+        assert_eq!(b.current, Some(2));
+        assert_eq!(b.matches[2].group, MatchGroup::Winners);
+        assert_eq!(b.matches[2].round, 2);
+        let expected_match_id = b.matches[2].id.clone();
+
+        // Persist and reload.
+        save_battle(&conn, &b).unwrap();
+        let loaded = load_latest(&conn).unwrap().expect("battle present after save");
+
+        // ── assertions that catch the load-ordering bug ──────────────────────
+        assert_eq!(
+            loaded.current,
+            Some(2),
+            "current index must survive the round-trip"
+        );
+        assert_eq!(
+            loaded.matches[2].id, expected_match_id,
+            "index 2 must be the WB-r2 match, not LB-r1 or Grand-r1 (load-order regression)"
+        );
+        assert_eq!(loaded.matches[2].group, MatchGroup::Winners);
+        assert_eq!(loaded.matches[2].round, 2);
+
+        // start_match uses first_playable() to find the next Pending match with
+        // both songs present; it must land on the same WB-r2 match.
+        let mut loaded = loaded;
+        loaded.start_match().unwrap();
+        assert_eq!(
+            loaded.current,
+            Some(2),
+            "start_match must activate WB-r2 (not LB-r1)"
+        );
+        assert_eq!(loaded.matches[2].state, MatchState::Active);
+        assert_eq!(loaded.matches[2].id, expected_match_id);
+    }
+
+    #[test]
+    fn double_elim_mode_and_routing_round_trip() {
+        let conn = open_in_memory().unwrap();
+        let mut b = sample(); // 4 songs
+        b.generate_bracket(BattleMode::Double).unwrap();
+        save_battle(&conn, &b).unwrap();
+
+        let loaded = load_latest(&conn).unwrap().unwrap();
+        assert_eq!(loaded.mode, BattleMode::Double);
+        assert_eq!(loaded.matches.len(), b.matches.len()); // 7
+        // mode/group/best_of persisted
+        assert!(loaded
+            .matches
+            .iter()
+            .any(|m| m.group == MatchGroup::Grand));
+        // routing was recomputed on load (not persisted): WB final → grand slot a.
+        let wf = loaded
+            .matches
+            .iter()
+            .find(|m| m.group == MatchGroup::Winners && m.round == 2)
+            .unwrap();
+        assert_eq!(wf.win_to.unwrap().group, MatchGroup::Grand);
+        assert!(wf.win_to.unwrap().slot_a);
     }
 }

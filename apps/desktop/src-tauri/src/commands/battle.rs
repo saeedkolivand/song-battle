@@ -1,4 +1,4 @@
-use crate::domain::battle::Battle;
+use crate::domain::battle::{Battle, BattleMode};
 use crate::error::AppResult;
 use crate::state::AppState;
 use tauri::State;
@@ -20,8 +20,8 @@ pub async fn create_battle(
 }
 
 #[tauri::command]
-pub async fn generate_bracket(state: State<'_, AppState>) -> AppResult<()> {
-    state.with_battle(Battle::generate_bracket)??;
+pub async fn generate_bracket(mode: BattleMode, state: State<'_, AppState>) -> AppResult<()> {
+    state.with_battle(|b| b.generate_bracket(mode))??;
     state.persist().await;
     Ok(())
 }
