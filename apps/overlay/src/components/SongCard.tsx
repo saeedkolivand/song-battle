@@ -1,16 +1,19 @@
 import type { Song } from '@sb/types';
 import { VoteBar } from './VoteBar';
+import { COLOR_A, COLOR_B } from '../colors';
 
 type Side = 'a' | 'b';
 
-// One competitor: artwork, title, artist, and its vote bar. Highlights with a
-// coloured ring when it has won the match.
+// One competitor: artwork, title, artist, and its vote bar. The winner gets a
+// coloured ring + glow + slight scale-up; the loser dims and desaturates.
 export function SongCard({
   song,
   side,
   pct,
   votes,
   won,
+  lost,
+  leading,
   reduce,
 }: {
   song: Song | null;
@@ -18,16 +21,20 @@ export function SongCard({
   pct: number;
   votes: number;
   won: boolean;
+  lost: boolean;
+  leading: boolean;
   reduce: boolean;
 }) {
   const ring = side === 'a' ? 'ring-a' : 'ring-b';
+  const color = side === 'a' ? COLOR_A : COLOR_B;
+
+  const stateClass = won ? `scale-[1.04] ring-4 ${ring}` : lost ? 'scale-[0.97] opacity-50 saturate-50' : '';
 
   return (
     <div className="flex w-full flex-col gap-[1vw]">
       <div
-        className={`overflow-hidden rounded-[1.2vw] border border-white/10 bg-black/40 shadow-2xl backdrop-blur-md transition-shadow ${
-          won ? `ring-4 ${ring}` : ''
-        }`}
+        className={`overflow-hidden rounded-[1.2vw] border border-white/10 bg-black/40 shadow-2xl backdrop-blur-md transition-all duration-500 ${stateClass}`}
+        style={won ? { boxShadow: `0 0 4vw -0.8vw ${color}` } : undefined}
       >
         <div className="aspect-square w-full bg-white/5">
           {song?.thumbnail ? (
@@ -41,7 +48,7 @@ export function SongCard({
           <div className="truncate text-[1.1vw] text-white/55">{song?.artist ?? '—'}</div>
         </div>
       </div>
-      <VoteBar side={side} pct={pct} votes={votes} reduce={reduce} />
+      <VoteBar side={side} pct={pct} votes={votes} leading={leading} reduce={reduce} />
     </div>
   );
 }

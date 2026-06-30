@@ -5,6 +5,8 @@ import { connectOverlay } from '@sb/shared';
 import type { Snapshot, Song } from '@sb/types';
 import { Stage } from './Stage';
 import { matchSwap, swapTransition } from './motion';
+import { WinnerConfetti, type Celebration } from './components/WinnerConfetti';
+import { COLOR_ACCENT } from './colors';
 
 // The overlay is a dumb projection of server snapshots over the axum WS. It
 // derives the WS URL from its own origin so it works on any port OBS loads.
@@ -19,17 +21,33 @@ export function App() {
   const match = battle?.currentMatch ?? null;
   const finished = battle?.status === 'finished' && battle.winner;
 
+  // Fire confetti once per win; champion takes priority over a match decision.
+  const celebration: Celebration | null =
+    finished && battle?.winner
+      ? { key: `champion:${battle.winner.id}`, champion: true }
+      : match && match.winner
+        ? { key: `match:${match.id}:${match.winner}`, champion: false }
+        : null;
+
   // Reduced motion: opacity-only crossfade, no positional jump.
   const anim: MotionProps = reduce
     ? { initial: { opacity: 0 }, animate: { opacity: 1 }, exit: { opacity: 0 }, transition: { duration: 0.15 } }
     : { variants: matchSwap, initial: 'initial', animate: 'animate', exit: 'exit', transition: swapTransition };
 
   return (
-    <div className="flex h-full w-full items-center justify-center overflow-hidden p-[3vw] text-white">
+    <div className="relative flex h-full w-full items-center justify-center overflow-hidden p-[3vw] text-white">
+      {match ? (
+        <div
+          aria-hidden="true"
+          className="pointer-events-none fixed inset-0"
+          style={{ background: 'radial-gradient(46vw 32vw at 50% 44%, rgba(251, 191, 36, 0.12), transparent 70%)' }}
+        />
+      ) : null}
+
       <AnimatePresence mode="wait">
         {finished && battle?.winner ? (
           <motion.div key="winner" {...anim}>
-            <WinnerCard song={battle.winner} />
+            <WinnerCard song={battle.winner} reduce={reduce} />
           </motion.div>
         ) : match ? (
           <motion.div key={match.id} className="w-full" {...anim}>
@@ -41,15 +59,23 @@ export function App() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      <WinnerConfetti celebration={celebration} reduce={reduce} />
     </div>
   );
 }
 
-function WinnerCard({ song }: { song: Song }) {
+function WinnerCard({ song, reduce }: { song: Song; reduce: boolean }) {
   return (
     <div className="flex flex-col items-center gap-[1.5vw] text-center">
-      <span className="text-[1.4vw] font-bold uppercase tracking-[0.3em] text-white/60">Champion</span>
-      <div className="overflow-hidden rounded-[1.5vw] border border-white/15 bg-black/40 shadow-2xl ring-4 ring-a backdrop-blur-md">
+      <span className="sb-shadow text-[1.4vw] font-bold uppercase tracking-[0.3em] text-accent">Champion</span>
+      <motion.div
+        className="overflow-hidden rounded-[1.5vw] border border-accent/40 bg-black/40 ring-4 ring-accent backdrop-blur-md"
+        style={{ boxShadow: `0 0 6vw -1vw ${COLOR_ACCENT}` }}
+        initial={reduce ? { opacity: 0 } : { opacity: 0, scale: 0.85 }}
+        animate={reduce ? { opacity: 1 } : { opacity: 1, scale: 1 }}
+        transition={reduce ? { duration: 0.2 } : { type: 'spring', stiffness: 140, damping: 14 }}
+      >
         <div className="h-[26vw] w-[26vw] bg-white/5">
           {song.thumbnail ? (
             <img src={song.thumbnail} alt="" className="h-full w-full object-cover" />
@@ -57,10 +83,10 @@ function WinnerCard({ song }: { song: Song }) {
             <div className="flex h-full w-full items-center justify-center text-[6vw] text-white/20">♪</div>
           )}
         </div>
-      </div>
+      </motion.div>
       <div>
-        <div className="text-[3vw] font-black leading-tight">{song.title}</div>
-        <div className="text-[1.6vw] text-white/55">{song.artist ?? ''}</div>
+        <div className="sb-shadow text-[3vw] font-black leading-tight">{song.title}</div>
+        <div className="sb-shadow text-[1.6vw] text-white/70">{song.artist ?? ''}</div>
       </div>
     </div>
   );

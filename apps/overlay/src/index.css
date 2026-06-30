@@ -1,9 +1,10 @@
 @import 'tailwindcss';
 
-/* Competitor colour tokens → bg-a/text-a/ring-a and bg-b/text-b/ring-b. */
+/* Competitor + accent colour tokens → bg-a/text-a/ring-a, bg-b/…, text-accent/ring-accent. */
 @theme {
   --color-a: #34d399; /* emerald */
   --color-b: #38bdf8; /* sky */
+  --color-accent: #fbbf24; /* amber */
 }
 
 /* Transparent canvas for OBS browser source. */
@@ -15,4 +16,21 @@ body,
   background: transparent;
   overflow: hidden;
   font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
+}
+
+/* Legibility over arbitrary stream footage (text not sitting on a plate). */
+.sb-shadow {
+  text-shadow:
+    0 0.12vw 0.45vw rgba(0, 0, 0, 0.75),
+    0 0 0.12vw rgba(0, 0, 0, 0.55);
+}
+
+/* Travelling highlight on the leading vote bar (JS gates it off under reduced motion). */
+@keyframes sb-shimmer {
+  0% {
+    transform: translateX(-130%) skewX(-12deg);
+  }
+  100% {
+    transform: translateX(360%) skewX(-12deg);
+  }
 }
