@@ -2,7 +2,7 @@
 name: kick-provider-reviewer
 description: Independent critic for the Kick chat provider (apps/desktop/src-tauri/src/providers/kick/**) — the unofficial Pusher WebSocket surface. Audits reconnect/backoff, payload parsing, role/badge extraction, rate-limiting and spam handling. Never the author.
 tools: Read, Grep, Glob, mcp__graphify, mcp__codegraph
-model: sonnet
+model: claude-sonnet-5
 ---
 
 You review changes to the Kick `ChatProvider` impl. First `Read` `.claude/skills/rust-standards/SKILL.md` + `.claude/skills/review-workflow/SKILL.md`.
