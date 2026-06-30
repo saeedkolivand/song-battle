@@ -1,5 +1,7 @@
-// Shared domain DTOs. These mirror the Rust serde structs (single source of truth
-// lives in src-tauri); keep field names in sync across the FFI boundary.
+// Shared domain DTOs — the integration contract between the Rust backend and both
+// frontends. The Rust serde structs are the source of truth and MUST serialize to
+// these exact shapes (`#[serde(rename_all = "camelCase")]`). Overlay (WS) and
+// dashboard (Tauri events) both consume `Snapshot`.
 
 export type Source = 'youtube' | 'spotify' | 'soundcloud';
 
@@ -61,10 +63,59 @@ export interface ProviderDescriptor {
   };
 }
 
-// State broadcast to overlay (WS) and dashboard (Tauri events). Both consume the
-// SAME snapshot so they can never disagree. Phase 0 carries only a heartbeat; the
-// full battle/vote/timer/bracket fields land in Phase 1.
+// ── Live state ────────────────────────────────────────────────────────────────
+// One snapshot is broadcast to the overlay (WS) and the dashboard (Tauri events),
+// carrying a monotonic `seq` so clients can drop stale frames.
+
+export type MatchState = 'pending' | 'active' | 'done';
+export type BattleStatus = 'idle' | 'running' | 'finished';
+
+export interface TimerView {
+  durationSec: number;
+  remainingSec: number;
+  running: boolean;
+}
+
+export interface MatchView {
+  id: string;
+  round: number; // 1-based
+  a: Song | null; // null = bye / not-yet-decided slot
+  b: Song | null;
+  votesA: number;
+  votesB: number;
+  pctA: number; // 0..100, integer
+  pctB: number;
+  total: number;
+  state: MatchState;
+  winner: 'a' | 'b' | null;
+  timer: TimerView | null; // present while active
+}
+
+export interface BattleView {
+  id: string;
+  title: string;
+  description: string;
+  theme: string;
+  status: BattleStatus;
+  round: number; // current round, 1-based
+  totalRounds: number;
+  currentMatch: MatchView | null;
+  bracket: MatchView[]; // every match, for bracket-progress rendering
+  winner: Song | null; // overall winner once finished
+  songs: Song[]; // full roster (dashboard Songs page; overlay ignores it)
+  songCount: number;
+}
+
+export interface KickView {
+  state: ConnectionState;
+  channel: string | null;
+}
+
 export interface Snapshot {
   seq: number;
-  counter: number;
+  battle: BattleView | null;
+  kick: KickView;
 }
+
+// Vote-command parsing lives in Rust; this is the normalized result the tally uses.
+export type VoteChoice = 'a' | 'b';

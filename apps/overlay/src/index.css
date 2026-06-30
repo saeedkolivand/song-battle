@@ -1,5 +1,11 @@
 @import 'tailwindcss';
 
+/* Competitor colour tokens → bg-a/text-a/ring-a and bg-b/text-b/ring-b. */
+@theme {
+  --color-a: #34d399; /* emerald */
+  --color-b: #38bdf8; /* sky */
+}
+
 /* Transparent canvas for OBS browser source. */
 html,
 body,
@@ -7,4 +13,6 @@ body,
   margin: 0;
   height: 100%;
   background: transparent;
+  overflow: hidden;
+  font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
 }
