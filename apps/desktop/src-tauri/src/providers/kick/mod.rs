@@ -43,21 +43,35 @@ fn next_backoff(prev: u64, clean_close: bool) -> u64 {
 
 pub struct KickProvider {
     channel: String,
+    /// Manually-supplied chatroom id — bypasses the Cloudflare-blocked channel API.
+    chatroom_id: Option<i64>,
 }
 
 impl KickProvider {
-    pub fn new(channel: String) -> Self {
+    pub fn new(channel: String, chatroom_id: Option<i64>) -> Self {
         Self {
             channel: channel.trim().to_string(),
+            chatroom_id,
         }
     }
 
     async fn fetch_chatroom_id(&self) -> AppResult<i64> {
         validate_channel(&self.channel)?; // defense-in-depth before URL interpolation
         let url = format!("{KICK_CHANNEL_API}/{}", self.channel);
+        // Best-effort browser-like headers. If Cloudflare bot-protection rejects this
+        // (TLS-fingerprint based — headers can't always satisfy it), the user can paste
+        // the chatroom id manually instead (see KickProvider::chatroom_id).
         let resp = net::shared()
             .get(&url)
             .header(reqwest::header::ACCEPT, "application/json")
+            .header(reqwest::header::ACCEPT_LANGUAGE, "en-US,en;q=0.9")
+            .header(reqwest::header::REFERER, format!("https://kick.com/{}", self.channel))
+            .header("sec-ch-ua", "\"Chromium\";v=\"127\", \"Not)A;Brand\";v=\"99\"")
+            .header("sec-ch-ua-mobile", "?0")
+            .header("sec-ch-ua-platform", "\"Windows\"")
+            .header("sec-fetch-dest", "empty")
+            .header("sec-fetch-mode", "cors")
+            .header("sec-fetch-site", "same-origin")
             .send()
             .await?;
         let status = resp.status();
@@ -79,7 +93,11 @@ impl KickProvider {
     }
 
     async fn connect_once(&self, tx: &Sender<ProviderEvent>) -> AppResult<()> {
-        let chatroom_id = self.fetch_chatroom_id().await?;
+        // Prefer a manual chatroom id (the channel API is Cloudflare-blocked); else look it up.
+        let chatroom_id = match self.chatroom_id {
+            Some(id) => id,
+            None => self.fetch_chatroom_id().await?,
+        };
         let pusher_url = format!(
             "wss://ws-us2.pusher.com/app/{PUSHER_APP_KEY}?protocol=7&client=js&version=8.4.0-rc2&flash=false"
         );

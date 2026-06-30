@@ -30,7 +30,8 @@ export const ipc = {
   skipMatch: () => invoke<void>('skip_match'),
   setTimer: (durationSec: number) => invoke<void>('set_timer', { durationSec }),
 
-  connectKick: (channel: string) => invoke<void>('connect_kick', { channel }),
+  connectKick: (channel: string, chatroomId?: number) =>
+    invoke<void>('connect_kick', { channel, chatroomId: chatroomId ?? null }),
   disconnectKick: () => invoke<void>('disconnect_kick'),
 
   exportJson: () => invoke<string>('export_json'),

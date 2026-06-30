@@ -6,9 +6,12 @@ import { useAction } from '../../lib/useAction';
 import { PageHeader, Section, ConnectionPill, ErrorNote, Stat } from '../../components/common';
 
 export function KickPage() {
-  const kick = useBattleStore((s) => s.snapshot?.kick ?? { state: 'disconnected' as const, channel: null });
+  const kick = useBattleStore(
+    (s) => s.snapshot?.kick ?? { state: 'disconnected' as const, channel: null },
+  );
   const { pending, error, run } = useAction();
   const [channel, setChannel] = useState('');
+  const [chatroomId, setChatroomId] = useState('');
 
   const busy = pending || kick.state === 'connecting' || kick.state === 'reconnecting';
   const connected = kick.state === 'connected';
@@ -29,11 +32,31 @@ export function KickPage() {
               spellCheck={false}
             />
           </Field>
+          <Field label="Chatroom ID (optional)">
+            <Input
+              value={chatroomId}
+              onChange={(e) => setChatroomId(e.target.value.replace(/[^0-9]/g, ''))}
+              placeholder="e.g. 123456"
+              inputMode="numeric"
+              disabled={connected}
+            />
+          </Field>
+          <p className="text-xs leading-relaxed text-white/50">
+            Only needed if Connect is blocked by Kick (a &quot;security policy&quot; 403). Open this
+            URL in your browser and copy <code className="text-white/70">chatroom.id</code>:{' '}
+            <code className="break-all text-white/70">
+              https://kick.com/api/v2/channels/{channel.trim() || 'your-channel'}
+            </code>
+          </p>
           <ErrorNote message={error} />
           <div className="flex gap-3">
             <Button
               variant="primary"
-              onClick={() => run(() => ipc.connectKick(channel.trim()))}
+              onClick={() =>
+                run(() =>
+                  ipc.connectKick(channel.trim(), chatroomId ? Number(chatroomId) : undefined),
+                )
+              }
               disabled={busy || connected || channel.trim().length === 0}
             >
               {busy ? 'Connecting…' : 'Connect'}
