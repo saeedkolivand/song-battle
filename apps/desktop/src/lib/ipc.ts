@@ -1,5 +1,8 @@
 import { invoke } from '@tauri-apps/api/core';
-import type { Snapshot } from '@sb/types';
+import type { Snapshot, SavedBattle, Settings } from '@sb/types';
+
+// Canonical type lives in @sb/types; alias kept for existing call sites.
+export type AppSettings = Settings;
 
 // Typed wrappers over the Rust command surface. Command *names* are snake_case
 // (the Rust side); Tauri converts camelCase JS arg keys to snake_case params.
@@ -28,6 +31,17 @@ export const ipc = {
   exportJson: () => invoke<string>('export_json'),
   importJson: (json: string) => invoke<void>('import_json', { json }),
 
+  // Saved tournaments (Phase 2).
+  listBattles: () => invoke<SavedBattle[]>('list_battles'),
+  loadBattle: (id: string) => invoke<void>('load_battle', { id }),
+  deleteBattle: (id: string) => invoke<void>('delete_battle', { id }),
+
+  // Persisted settings (Phase 2).
+  getSettings: () => invoke<AppSettings>('get_settings'),
+  setAnonymous: (anonymous: boolean) => invoke<void>('set_anonymous', { anonymous }),
+  setDefaultTimer: (sec: number) => invoke<void>('set_default_timer', { sec }),
+
   overlayUrl: () => invoke<string>('overlay_url'),
+  openOverlayWindow: () => invoke<void>('open_overlay_window'),
   ping: () => invoke<string>('ping'),
 };

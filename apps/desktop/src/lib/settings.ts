@@ -1,11 +1,10 @@
-// Local UI preferences (accent colour, default timer). These are renderer-only
-// conveniences persisted in localStorage — not battle state. The accent is wired
-// to the Tailwind `--color-accent` token so every `accent` utility re-themes live.
+// Local UI preference: accent colour only. Pure renderer state persisted in
+// localStorage and wired to the Tailwind `--color-accent` token so every `accent`
+// utility re-themes live. The default-timer setting moved to the backend
+// (get_settings / set_default_timer) in Phase 2.
 
 const ACCENT_KEY = 'sb.accent';
-const TIMER_KEY = 'sb.timerDefault';
 const DEFAULT_ACCENT = '#34d399';
-const DEFAULT_TIMER = 30;
 
 export interface Accent {
   name: string;
@@ -31,13 +30,4 @@ export function applyAccent(): void {
 export function setAccent(value: string): void {
   localStorage.setItem(ACCENT_KEY, value);
   applyAccent();
-}
-
-export function getTimerDefault(): number {
-  const raw = Number(localStorage.getItem(TIMER_KEY));
-  return Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_TIMER;
-}
-
-export function setTimerDefault(seconds: number): void {
-  localStorage.setItem(TIMER_KEY, String(seconds));
 }

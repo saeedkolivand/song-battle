@@ -74,6 +74,37 @@ pub struct Snapshot {
     pub seq: u64,
     pub battle: Option<BattleView>,
     pub kick: KickView,
+    /// When true, overlay/dashboard hide voter identities (from `Settings`).
+    pub anonymous: bool,
+}
+
+/// Persisted app settings (single row). `get_settings` returns this shape.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Settings {
+    pub anonymous: bool,
+    pub default_timer_sec: u32,
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Self {
+            anonymous: false,
+            default_timer_sec: 30,
+        }
+    }
+}
+
+/// Summary row for the saved-tournaments list (`list_battles`).
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SavedBattle {
+    pub id: String,
+    pub title: String,
+    pub theme: String,
+    pub status: BattleStatus,
+    pub song_count: u32,
+    pub updated_at: i64,
 }
 
 fn match_view(m: &Match) -> MatchView {
@@ -100,12 +131,37 @@ fn match_view(m: &Match) -> MatchView {
     }
 }
 
-pub fn battle_view(b: &Battle) -> BattleView {
-    let bracket: Vec<MatchView> = b.matches.iter().map(match_view).collect();
-    let current_match = b.current.and_then(|i| b.matches.get(i)).map(match_view);
-    let round = current_match
-        .as_ref()
-        .map_or(b.total_rounds, |m| m.round);
+/// Drop submitter identity from a song slot (anonymous mode).
+fn redact(song: &mut Option<Song>) {
+    if let Some(s) = song {
+        s.submitter = None;
+    }
+}
+
+pub fn battle_view(b: &Battle, anonymous: bool) -> BattleView {
+    let mut bracket: Vec<MatchView> = b.matches.iter().map(match_view).collect();
+    let mut current_match = b.current.and_then(|i| b.matches.get(i)).map(match_view);
+    let round = current_match.as_ref().map_or(b.total_rounds, |m| m.round);
+    let mut songs = b.songs.clone();
+    let mut winner = b.winner.clone();
+
+    // Anonymous mode strips submitter identity server-side, so PII never crosses
+    // the WS — not merely hidden client-side.
+    if anonymous {
+        for m in &mut bracket {
+            redact(&mut m.a);
+            redact(&mut m.b);
+        }
+        if let Some(m) = &mut current_match {
+            redact(&mut m.a);
+            redact(&mut m.b);
+        }
+        for s in &mut songs {
+            s.submitter = None;
+        }
+        redact(&mut winner);
+    }
+
     BattleView {
         id: b.id.clone(),
         title: b.title.clone(),
@@ -116,8 +172,8 @@ pub fn battle_view(b: &Battle) -> BattleView {
         total_rounds: b.total_rounds,
         current_match,
         bracket,
-        winner: b.winner.clone(),
-        songs: b.songs.clone(),
+        winner,
+        songs,
         song_count: b.songs.len() as u32,
     }
 }

@@ -18,7 +18,9 @@ mod providers;
 mod server;
 mod state;
 
+use error::AppResult;
 use state::AppState;
+use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
 
 // IPC: dashboard → Rust. Phase 0 round-trip probes; the battle/song/match verbs
 // live under `commands/`.
@@ -30,6 +32,22 @@ fn ping() -> String {
 #[tauri::command]
 fn overlay_url() -> String {
     format!("http://localhost:{}/", server::PORT)
+}
+
+/// Open (or focus) a fullscreen window showing the overlay — local preview / the
+/// F hotkey. `overlay_url` stays for OBS / external browsers.
+#[tauri::command]
+fn open_overlay_window(app: tauri::AppHandle) -> AppResult<()> {
+    if let Some(w) = app.get_webview_window("overlay") {
+        w.set_focus()?;
+        return Ok(());
+    }
+    let url = url::Url::parse(&format!("http://localhost:{}/", server::PORT))?;
+    WebviewWindowBuilder::new(&app, "overlay", WebviewUrl::External(url))
+        .title("Song Battle Overlay")
+        .fullscreen(true)
+        .build()?;
+    Ok(())
 }
 
 /// Open the on-disk DB, falling back to in-memory so the app still launches.
@@ -76,6 +94,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             ping,
             overlay_url,
+            open_overlay_window,
             commands::battle::create_battle,
             commands::battle::generate_bracket,
             commands::battle::start_match,
@@ -90,6 +109,12 @@ pub fn run() {
             commands::io::get_snapshot,
             commands::io::export_json,
             commands::io::import_json,
+            commands::tournaments::list_battles,
+            commands::tournaments::load_battle,
+            commands::tournaments::delete_battle,
+            commands::settings::get_settings,
+            commands::settings::set_anonymous,
+            commands::settings::set_default_timer,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

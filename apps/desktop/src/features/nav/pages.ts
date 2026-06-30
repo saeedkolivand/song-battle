@@ -1,6 +1,7 @@
 import type { ComponentType } from 'react';
 import { HomePage } from '../home/HomePage';
 import { BattlePage } from '../battle/BattlePage';
+import { TournamentsPage } from '../tournaments/TournamentsPage';
 import { SongsPage } from '../songs/SongsPage';
 import { BracketPage } from '../bracket/BracketPage';
 import { KickPage } from '../kick/KickPage';
@@ -12,6 +13,7 @@ import { AboutPage } from '../about/AboutPage';
 export type PageId =
   | 'home'
   | 'battle'
+  | 'tournaments'
   | 'songs'
   | 'bracket'
   | 'kick'
@@ -20,16 +22,22 @@ export type PageId =
   | 'logs'
   | 'about';
 
+// Pages may navigate (e.g. Tournaments → Battle). Most ignore the prop.
+export interface PageProps {
+  onNavigate: (id: PageId) => void;
+}
+
 export interface PageDef {
   id: PageId;
   label: string;
-  component: ComponentType;
+  component: ComponentType<PageProps>;
 }
 
-// Ordered for the sidebar. `functional` pages first, utility/placeholder last.
+// Ordered for the sidebar. Functional pages first, utility/placeholder last.
 export const PAGES: PageDef[] = [
   { id: 'home', label: 'Home', component: HomePage },
   { id: 'battle', label: 'Battle', component: BattlePage },
+  { id: 'tournaments', label: 'Tournaments', component: TournamentsPage },
   { id: 'songs', label: 'Songs', component: SongsPage },
   { id: 'bracket', label: 'Bracket', component: BracketPage },
   { id: 'kick', label: 'Kick', component: KickPage },
@@ -39,6 +47,6 @@ export const PAGES: PageDef[] = [
   { id: 'about', label: 'About', component: AboutPage },
 ];
 
-export function pageComponent(id: PageId): ComponentType {
+export function pageComponent(id: PageId): ComponentType<PageProps> {
   return (PAGES.find((p) => p.id === id) ?? PAGES[0]).component;
 }

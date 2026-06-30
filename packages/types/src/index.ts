@@ -115,7 +115,24 @@ export interface Snapshot {
   seq: number;
   battle: BattleView | null;
   kick: KickView;
+  anonymous: boolean; // when true, overlay/recent-votes hide voter identities
 }
 
 // Vote-command parsing lives in Rust; this is the normalized result the tally uses.
 export type VoteChoice = 'a' | 'b';
+
+// Persisted app settings (Rust get_settings/set_*).
+export interface Settings {
+  anonymous: boolean;
+  defaultTimerSec: number;
+}
+
+// Summary row for the saved-tournaments list (list_battles command).
+export interface SavedBattle {
+  id: string;
+  title: string;
+  theme: string;
+  status: BattleStatus;
+  songCount: number;
+  updatedAt: number; // epoch ms
+}

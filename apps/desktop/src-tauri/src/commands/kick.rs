@@ -1,5 +1,6 @@
+use crate::domain::battle::Battle;
 use crate::domain::snapshot::ConnectionState;
-use crate::domain::vote::parse_vote;
+use crate::domain::vote::{classify_chat, ChatAction};
 use crate::error::AppResult;
 use crate::providers::kick::{validate_channel, KickProvider};
 use crate::providers::{now_ms, ChatProvider, ProviderEvent};
@@ -30,13 +31,26 @@ pub async fn connect_kick(channel: String, state: State<'_, AppState>) -> AppRes
                     app.set_kick_state(s);
                     app.mark_dirty();
                 }
-                ProviderEvent::Message(m) => {
-                    if let Some(choice) = parse_vote(&m.text) {
+                ProviderEvent::Message(m) => match classify_chat(m.user.is_mod, &m.text) {
+                    ChatAction::Vote(choice) => {
                         if app.cast_vote(m.user.user_id, choice, now_ms()) {
                             app.mark_dirty();
                         }
                     }
-                }
+                    // Mod-only: reset the current match's votes (not persisted state).
+                    ChatAction::ResetVotes => {
+                        if app.with_battle(Battle::reset_votes).is_ok() {
+                            app.mark_dirty();
+                        }
+                    }
+                    // Mod-only: skip resolves the match → persist the bracket change.
+                    ChatAction::Skip => {
+                        if app.with_battle(Battle::skip_match).is_ok() {
+                            app.persist().await;
+                        }
+                    }
+                    ChatAction::Ignore => {}
+                },
             }
         }
     });

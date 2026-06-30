@@ -19,6 +19,31 @@ pub fn parse_vote(text: &str) -> Option<VoteChoice> {
     }
 }
 
+/// What a chat message resolves to, given the sender's mod status. Mod-only
+/// control commands (`!reset`/`!resetvotes`, `!skip`) take precedence; otherwise
+/// it's a vote or ignored. Non-mods' control commands fall through to `Ignore`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChatAction {
+    Vote(VoteChoice),
+    ResetVotes,
+    Skip,
+    Ignore,
+}
+
+pub fn classify_chat(is_mod: bool, text: &str) -> ChatAction {
+    if is_mod {
+        match text.trim().to_ascii_lowercase().as_str() {
+            "!reset" | "!resetvotes" => return ChatAction::ResetVotes,
+            "!skip" => return ChatAction::Skip,
+            _ => {}
+        }
+    }
+    match parse_vote(text) {
+        Some(c) => ChatAction::Vote(c),
+        None => ChatAction::Ignore,
+    }
+}
+
 /// Integer percentage 0..=100 (floored). `total == 0` → 0.
 pub fn pct(votes: u32, total: u32) -> u32 {
     (votes * 100).checked_div(total).unwrap_or(0)
@@ -113,5 +138,21 @@ mod tests {
         assert_eq!(pct(2, 3), 66); // floored
         assert_eq!(pct(1, 3), 33);
         assert_eq!(pct(3, 3), 100);
+    }
+
+    #[test]
+    fn classify_chat_mod_commands_and_votes() {
+        // mod control commands (trim + case-insensitive)
+        assert_eq!(classify_chat(true, "!reset"), ChatAction::ResetVotes);
+        assert_eq!(classify_chat(true, "!resetvotes"), ChatAction::ResetVotes);
+        assert_eq!(classify_chat(true, " !SKIP "), ChatAction::Skip);
+        // non-mods can't trigger control commands → ignored, not votes
+        assert_eq!(classify_chat(false, "!reset"), ChatAction::Ignore);
+        assert_eq!(classify_chat(false, "!skip"), ChatAction::Ignore);
+        // everyone (mod or not) can vote
+        assert_eq!(classify_chat(false, "1"), ChatAction::Vote(VoteChoice::A));
+        assert_eq!(classify_chat(true, "2"), ChatAction::Vote(VoteChoice::B));
+        // junk is ignored
+        assert_eq!(classify_chat(true, "hello"), ChatAction::Ignore);
     }
 }
