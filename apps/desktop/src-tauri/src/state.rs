@@ -366,8 +366,12 @@ impl AppState {
 
 /// Coalesced broadcaster: at 100ms cadence emit when state is dirty; tick the
 /// countdown once a second (re-emitting so it animates) and persist on resolve.
+///
+/// Uses `tauri::async_runtime::spawn` (NOT `tokio::spawn`) because it's launched
+/// from Tauri's synchronous `.setup()` hook, which is not inside a Tokio runtime —
+/// a raw `tokio::spawn` there panics with "there is no reactor running".
 pub fn spawn_broadcaster(state: AppState) {
-    tokio::spawn(async move {
+    tauri::async_runtime::spawn(async move {
         let mut tick = tokio::time::interval(Duration::from_millis(100));
         let mut last_sec = std::time::Instant::now();
         loop {
@@ -388,4 +392,19 @@ pub fn spawn_broadcaster(state: AppState) {
             }
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Regression for the launch panic: spawn_broadcaster runs from Tauri's sync
+    // .setup() hook, which has no ambient Tokio runtime. A raw `tokio::spawn` there
+    // panics ("there is no reactor running") at the call site — this test would fail
+    // if that regressed. The background loop is harmless (no app handle, no battle →
+    // it never broadcasts) and dies with the test process.
+    #[test]
+    fn broadcaster_spawns_without_ambient_runtime() {
+        spawn_broadcaster(AppState::test());
+    }
 }
