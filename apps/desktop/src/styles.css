@@ -1,5 +1,11 @@
 @import 'tailwindcss';
 
+/* Accent token → `text-accent` / `bg-accent` / `border-accent` / `ring-accent`
+   utilities. Overridable at runtime via --color-accent (see lib/settings.ts). */
+@theme {
+  --color-accent: #34d399;
+}
+
 :root {
   color-scheme: dark;
 }
@@ -9,4 +15,10 @@ body {
   background: #0a0a0f;
   color: #e5e7eb;
   font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
+}
+
+/* Slim dark scrollbars for the dashboard scroll regions. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
 }

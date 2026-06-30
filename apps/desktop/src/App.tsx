@@ -1,45 +1,38 @@
 import { useEffect, useState } from 'react';
-import { invoke } from '@tauri-apps/api/core';
-import { openUrl } from '@tauri-apps/plugin-opener';
-import { Card } from '@sb/ui';
+import { Sidebar } from './features/nav/Sidebar';
+import { pageComponent, type PageId } from './features/nav/pages';
+import { startSnapshotStream } from './stores/battle';
+import { applyAccent } from './lib/settings';
 
-// Phase 0 dashboard: proves IPC (ping) and surfaces the overlay URL for OBS.
-// Real pages (Home/Battle/Songs/Bracket/Overlay/OBS/Kick/Settings/Logs/About)
-// arrive in Phase 1.
 export default function App() {
-  const [pong, setPong] = useState('…');
-  const [overlay, setOverlay] = useState('');
+  const [page, setPage] = useState<PageId>('home');
 
+  // Sync with external systems: restore the saved accent token and subscribe to
+  // the backend snapshot stream. Dispose the listener on unmount.
   useEffect(() => {
-    invoke<string>('ping')
-      .then(setPong)
-      .catch((e) => setPong(`error: ${e}`));
-    invoke<string>('overlay_url').then(setOverlay).catch(() => {});
+    applyAccent();
+    let dispose: (() => void) | undefined;
+    let active = true;
+    void startSnapshotStream().then((unlisten) => {
+      if (active) dispose = unlisten;
+      else unlisten();
+    });
+    return () => {
+      active = false;
+      dispose?.();
+    };
   }, []);
 
+  const Page = pageComponent(page);
+
   return (
-    <main className="mx-auto flex min-h-screen max-w-2xl flex-col gap-6 p-10">
-      <header>
-        <h1 className="text-3xl font-black">Song Battle</h1>
-        <p className="text-sm opacity-60">Music tournaments decided by your Kick chat.</p>
-      </header>
-
-      <Card>
-        <div className="text-xs uppercase tracking-widest opacity-60">Rust IPC</div>
-        <div className="mt-1 text-xl">{pong}</div>
-      </Card>
-
-      <Card>
-        <div className="text-xs uppercase tracking-widest opacity-60">OBS overlay URL</div>
-        <button
-          type="button"
-          onClick={() => overlay && openUrl(overlay)}
-          className="mt-1 text-lg text-emerald-400 hover:underline"
-        >
-          {overlay || '—'}
-        </button>
-        <p className="mt-2 text-sm opacity-60">Add this as a Browser Source in OBS.</p>
-      </Card>
-    </main>
+    <div className="flex h-screen overflow-hidden">
+      <Sidebar current={page} onNavigate={setPage} />
+      <main className="flex-1 overflow-y-auto">
+        <div className="mx-auto max-w-5xl px-8 py-8">
+          <Page />
+        </div>
+      </main>
+    </div>
   );
 }
