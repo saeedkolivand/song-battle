@@ -50,3 +50,24 @@ pub async fn shuffle_songs(state: State<'_, AppState>) -> AppResult<()> {
     state.persist().await;
     Ok(())
 }
+
+/// Drag-to-seed: set the song order. Only allowed in the lobby (no bracket yet),
+/// since seeding is read from `songs` at generation; once a bracket exists it's a no-op.
+#[tauri::command]
+pub async fn reorder_songs(
+    ordered_ids: Vec<String>,
+    state: State<'_, AppState>,
+) -> AppResult<()> {
+    let reordered = state.with_battle(|b| {
+        if b.matches.is_empty() {
+            b.reorder_songs(&ordered_ids);
+            true
+        } else {
+            false // bracket already generated → seeding locked
+        }
+    })?;
+    if reordered {
+        state.persist().await;
+    }
+    Ok(())
+}

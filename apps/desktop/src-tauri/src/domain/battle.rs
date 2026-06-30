@@ -80,6 +80,21 @@ impl Battle {
         self.songs.retain(|s| s.id != id);
     }
 
+    /// Reorder `songs` so the ids in `ordered_ids` come first, in that order; any
+    /// song not listed keeps its original relative order, appended at the end.
+    /// Defensive: unknown/duplicate ids are ignored and no song is ever dropped.
+    pub fn reorder_songs(&mut self, ordered_ids: &[String]) {
+        let mut remaining = std::mem::take(&mut self.songs);
+        let mut ordered = Vec::with_capacity(remaining.len());
+        for id in ordered_ids {
+            if let Some(pos) = remaining.iter().position(|s| &s.id == id) {
+                ordered.push(remaining.remove(pos)); // dedup: id no longer present
+            }
+        }
+        ordered.extend(remaining); // unlisted songs keep their relative order
+        self.songs = ordered;
+    }
+
     pub fn shuffle<R: rand::Rng>(&mut self, rng: &mut R) {
         use rand::seq::SliceRandom;
         self.songs.shuffle(rng);
@@ -375,6 +390,65 @@ mod tests {
         b.set_timer(2);
         b.generate_bracket(mode).unwrap();
         b
+    }
+
+    /// A lobby battle (no bracket) whose songs have the given ids.
+    fn lobby(ids: &[&str]) -> Battle {
+        let mut b = Battle::new("t".into(), "d".into(), "th".into());
+        for id in ids {
+            b.add_song(Song {
+                id: (*id).into(),
+                title: (*id).into(),
+                artist: None,
+                thumbnail: None,
+                duration_sec: None,
+                source: Source::Youtube,
+                source_url: format!("https://x/{id}"),
+                submitter: None,
+                metadata: None,
+            });
+        }
+        b
+    }
+
+    fn ids(b: &Battle) -> Vec<String> {
+        b.songs.iter().map(|s| s.id.clone()).collect()
+    }
+
+    #[test]
+    fn reorder_full_list() {
+        let mut b = lobby(&["a", "b", "c"]);
+        b.reorder_songs(&["c".into(), "a".into(), "b".into()]);
+        assert_eq!(ids(&b), ["c", "a", "b"]);
+    }
+
+    #[test]
+    fn reorder_partial_appends_unlisted_in_original_order() {
+        let mut b = lobby(&["a", "b", "c", "d"]);
+        // only move c to front; a, b, d keep their relative order after it
+        b.reorder_songs(&["c".into()]);
+        assert_eq!(ids(&b), ["c", "a", "b", "d"]);
+    }
+
+    #[test]
+    fn reorder_ignores_unknown_and_duplicate_ids_without_dropping() {
+        let mut b = lobby(&["a", "b", "c"]);
+        b.reorder_songs(&[
+            "ghost".into(), // unknown → ignored
+            "b".into(),
+            "b".into(), // duplicate → ignored the second time
+            "x".into(), // unknown → ignored
+        ]);
+        // b first; a, c keep original relative order; count preserved, nothing dropped
+        assert_eq!(ids(&b), ["b", "a", "c"]);
+        assert_eq!(b.songs.len(), 3);
+    }
+
+    #[test]
+    fn reorder_empty_list_is_noop() {
+        let mut b = lobby(&["a", "b"]);
+        b.reorder_songs(&[]);
+        assert_eq!(ids(&b), ["a", "b"]);
     }
 
     /// Cast `count` votes for `choice` (unique users, monotonic time), return next `now`.

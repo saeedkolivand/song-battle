@@ -104,6 +104,7 @@ pub fn run() {
             commands::song::import_song,
             commands::song::remove_song,
             commands::song::shuffle_songs,
+            commands::song::reorder_songs,
             commands::kick::connect_kick,
             commands::kick::disconnect_kick,
             commands::io::get_snapshot,
