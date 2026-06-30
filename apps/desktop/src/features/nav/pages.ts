@@ -8,7 +8,7 @@ import { KickPage } from '../kick/KickPage';
 import { OverlayPage } from '../overlay/OverlayPage';
 import { OBSPage } from '../obs/OBSPage';
 import { SettingsPage } from '../settings/SettingsPage';
-import { LogsPage } from '../logs/LogsPage';
+import { DevPanelPage } from '../dev/DevPanelPage';
 import { AboutPage } from '../about/AboutPage';
 
 export type PageId =
@@ -46,7 +46,7 @@ export const PAGES: PageDef[] = [
   { id: 'overlay', label: 'Overlay', component: OverlayPage },
   { id: 'obs', label: 'OBS', component: OBSPage },
   { id: 'settings', label: 'Settings', component: SettingsPage },
-  { id: 'logs', label: 'Logs', component: LogsPage },
+  { id: 'logs', label: 'Dev', component: DevPanelPage },
   { id: 'about', label: 'About', component: AboutPage },
 ];
 

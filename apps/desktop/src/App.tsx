@@ -5,12 +5,14 @@ import { startSnapshotStream } from './stores/battle';
 import { applyAccent } from './lib/settings';
 import { useGlobalHotkeys } from './lib/useHotkeys';
 import { useObsAutoSwitch } from './features/obs/useObs';
+import { useDevRecorder } from './features/dev/useDevRecorder';
 
 export default function App() {
   const [page, setPage] = useState<PageId>('home');
 
   useGlobalHotkeys();
   useObsAutoSwitch();
+  useDevRecorder();
 
   // Sync with external systems: restore the saved accent token and subscribe to
   // the backend snapshot stream. Dispose the listener on unmount.
