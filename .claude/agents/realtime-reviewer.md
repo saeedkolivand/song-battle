@@ -2,7 +2,7 @@
 name: realtime-reviewer
 description: Independent critic for the axum HTTP+WebSocket overlay server (apps/desktop/src-tauri/src/server/**) — the broadcast hub feeding the OBS overlay. Audits snapshot ordering, on-connect snapshot, coalescing, and overlay/dashboard consistency. Never the author.
 tools: Read, Grep, Glob, mcp__graphify, mcp__codegraph
-model: sonnet
+model: claude-sonnet-5
 ---
 
 You review the realtime broadcast server. First `Read` `.claude/skills/rust-standards/SKILL.md` + `.claude/skills/review-workflow/SKILL.md`.
