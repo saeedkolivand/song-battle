@@ -55,17 +55,27 @@ impl KickProvider {
     async fn fetch_chatroom_id(&self) -> AppResult<i64> {
         validate_channel(&self.channel)?; // defense-in-depth before URL interpolation
         let url = format!("{KICK_CHANNEL_API}/{}", self.channel);
-        let v: serde_json::Value = net::shared()
+        let resp = net::shared()
             .get(&url)
+            .header(reqwest::header::ACCEPT, "application/json")
             .send()
-            .await?
-            .error_for_status()?
-            .json()
             .await?;
-        v.get("chatroom")
+        let status = resp.status();
+        if !status.is_success() {
+            // Usually a Cloudflare challenge (often 403, HTML body) on the public
+            // channel API — log a snippet so the cause is obvious in the dev console.
+            let body: String = resp.text().await.unwrap_or_default().chars().take(160).collect();
+            tracing::error!("kick: channel API {url} -> {status}; body: {body}");
+            return Err(AppError::Other(format!("kick channel API returned {status}")));
+        }
+        let v: serde_json::Value = resp.json().await?;
+        let id = v
+            .get("chatroom")
             .and_then(|c| c.get("id"))
             .and_then(serde_json::Value::as_i64)
-            .ok_or_else(|| AppError::Other("kick: no chatroom id in channel response".into()))
+            .ok_or_else(|| AppError::Other("kick: no chatroom id in channel response".into()))?;
+        tracing::info!("kick: chatroom id {id} for channel '{}'", self.channel);
+        Ok(id)
     }
 
     async fn connect_once(&self, tx: &Sender<ProviderEvent>) -> AppResult<()> {
@@ -86,14 +96,18 @@ impl KickProvider {
         while let Some(frame) = read.next().await {
             if let Message::Text(t) = frame? {
                 match event_name(&t).as_deref() {
-                    Some(SUBSCRIBE_ACK) => emit(tx, ProviderEvent::Connection(ConnectionState::Connected)),
+                    Some(SUBSCRIBE_ACK) => {
+                        tracing::info!("kick: subscribed to chatroom.{chatroom_id} — connected");
+                        emit(tx, ProviderEvent::Connection(ConnectionState::Connected));
+                    }
                     Some(CHAT_EVENT) => {
                         if let Some(msg) = parse_frame(&t) {
                             emit(tx, ProviderEvent::Message(msg));
                         }
                     }
-                    // `pusher:connection_established`, pings, presence: ignore.
-                    _ => {}
+                    // `pusher:connection_established`, pings, presence: ignore. If Kick
+                    // renamed the chat event, run with RUST_LOG=debug to see what arrives.
+                    other => tracing::debug!("kick: ignored frame event {other:?}"),
                 }
             }
         }

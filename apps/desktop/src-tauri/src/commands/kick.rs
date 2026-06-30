@@ -37,9 +37,15 @@ pub async fn connect_kick(channel: String, state: State<'_, AppState>) -> AppRes
                     app.set_kick_state(s);
                     app.mark_dirty();
                 }
-                ProviderEvent::Message(m) => match classify_chat(m.user.is_mod, &m.text) {
+                ProviderEvent::Message(m) => {
+                    let who = m.user.username.clone();
+                    tracing::info!("kick chat: {who} -> '{}'", m.text);
+                    match classify_chat(m.user.is_mod, &m.text) {
                     ChatAction::Vote(choice) => {
-                        if app.cast_vote(m.user.user_id, choice, now_ms()) {
+                        // counted=false means no match is Active / its timer isn't running.
+                        let counted = app.cast_vote(m.user.user_id, choice, now_ms());
+                        tracing::info!("kick vote from {who}: counted={counted}");
+                        if counted {
                             app.mark_dirty();
                         }
                     }
@@ -77,7 +83,8 @@ pub async fn connect_kick(channel: String, state: State<'_, AppState>) -> AppRes
                         }
                     }
                     ChatAction::Ignore => {}
-                },
+                    }
+                }
             }
         }
     });
