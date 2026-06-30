@@ -28,7 +28,7 @@ export function Countdown({ timer, reduce }: { timer: TimerView; reduce: boolean
           r={R}
           fill="none"
           stroke={urgent ? '#f87171' : 'currentColor'}
-          className={urgent ? '' : 'text-white'}
+          className={urgent ? '' : 'text-accent'}
           strokeWidth="7"
           strokeLinecap="round"
           strokeDasharray={CIRC}
@@ -38,7 +38,7 @@ export function Countdown({ timer, reduce }: { timer: TimerView; reduce: boolean
         />
       </svg>
       <div
-        className={`absolute inset-0 flex items-center justify-center text-[3vw] font-black tabular-nums ${
+        className={`sb-shadow absolute inset-0 flex items-center justify-center text-[3vw] font-black tabular-nums ${
           urgent ? 'text-red-400' : 'text-white'
         }`}
       >

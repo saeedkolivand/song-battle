@@ -14,9 +14,13 @@ export function SeriesScore({ winsA, winsB, bestOf }: { winsA: number; winsB: nu
   if (bestOf <= 1) return null;
   const need = Math.floor(bestOf / 2) + 1;
   return (
-    <div className="flex items-center gap-[1vw]" role="img" aria-label={`Series score ${winsA} to ${winsB}`}>
+    <div
+      className="flex items-center gap-[1vw] rounded-full border border-white/10 bg-black/30 px-[1vw] py-[0.4vw] backdrop-blur-md"
+      role="img"
+      aria-label={`Series score ${winsA} to ${winsB}`}
+    >
       <Pips filled={winsA} total={need} fillClass="bg-a" />
-      <span className="text-[1.6vw] font-black tabular-nums text-white">
+      <span className="sb-shadow text-[1.6vw] font-black tabular-nums text-white">
         {winsA}–{winsB}
       </span>
       <Pips filled={winsB} total={need} fillClass="bg-b" />
