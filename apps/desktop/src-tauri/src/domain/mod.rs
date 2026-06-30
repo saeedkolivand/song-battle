@@ -4,5 +4,6 @@ pub mod battle;
 pub mod bracket;
 pub mod snapshot;
 pub mod song;
+pub mod submit;
 pub mod timer;
 pub mod vote;

@@ -28,6 +28,10 @@ export function SongsPage() {
       <PageHeader title="Songs" subtitle="Import tracks by URL. YouTube, Spotify and SoundCloud links are supported." />
 
       <Section title="Import song">
+        <p className="mb-4 text-sm text-white/40">
+          Viewers can also add songs by typing <code className="rounded bg-white/10 px-1 text-white/70">!submit &lt;url&gt;</code> in
+          chat while the bracket hasn&apos;t started yet (lobby only). Toggle this in Settings.
+        </p>
         <div className="flex flex-col gap-4">
           <Field label="Source URL">
             <Input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://youtube.com/watch?v=…" spellCheck={false} />

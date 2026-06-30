@@ -53,6 +53,9 @@ ALTER TABLE matches ADD COLUMN best_of INTEGER NOT NULL DEFAULT 1;
 ALTER TABLE matches ADD COLUMN wins_a INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE matches ADD COLUMN wins_b INTEGER NOT NULL DEFAULT 0;
 ";
+// Chat song submissions toggle (default on).
+const M5_CHAT_SUBMISSIONS: &str =
+    "ALTER TABLE settings ADD COLUMN chat_submissions INTEGER NOT NULL DEFAULT 1;";
 
 fn migrations() -> Migrations<'static> {
     Migrations::new(vec![
@@ -60,6 +63,7 @@ fn migrations() -> Migrations<'static> {
         M::up(M2_UPDATED_AT),
         M::up(M3_SETTINGS),
         M::up(M4_MODES),
+        M::up(M5_CHAT_SUBMISSIONS),
     ])
 }
 
@@ -164,12 +168,13 @@ pub fn delete_battle(conn: &Connection, id: &str) -> AppResult<()> {
 // ── settings ─────────────────────────────────────────────────────────────────
 pub fn get_settings(conn: &Connection) -> AppResult<Settings> {
     Ok(conn.query_row(
-        "SELECT anonymous, default_timer_sec FROM settings WHERE id=1",
+        "SELECT anonymous, default_timer_sec, chat_submissions FROM settings WHERE id=1",
         [],
         |r| {
             Ok(Settings {
                 anonymous: r.get::<_, i64>(0)? != 0,
                 default_timer_sec: r.get::<_, u32>(1)?,
+                chat_submissions: r.get::<_, i64>(2)? != 0,
             })
         },
     )?)
@@ -187,6 +192,14 @@ pub fn set_default_timer(conn: &Connection, sec: u32) -> AppResult<()> {
     conn.execute(
         "UPDATE settings SET default_timer_sec=? WHERE id=1",
         params![sec],
+    )?;
+    Ok(())
+}
+
+pub fn set_chat_submissions(conn: &Connection, enabled: bool) -> AppResult<()> {
+    conn.execute(
+        "UPDATE settings SET chat_submissions=? WHERE id=1",
+        params![enabled as i64],
     )?;
     Ok(())
 }
@@ -529,12 +542,15 @@ mod tests {
         let s = get_settings(&conn).unwrap();
         assert!(!s.anonymous);
         assert_eq!(s.default_timer_sec, 30);
+        assert!(s.chat_submissions); // default on
 
         set_anonymous(&conn, true).unwrap();
         set_default_timer(&conn, 45).unwrap();
+        set_chat_submissions(&conn, false).unwrap();
         let s = get_settings(&conn).unwrap();
         assert!(s.anonymous);
         assert_eq!(s.default_timer_sec, 45);
+        assert!(!s.chat_submissions);
     }
 
     /// REGRESSION for the CRITICAL load-ordering bug fixed in load_matches.

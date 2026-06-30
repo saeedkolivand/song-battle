@@ -8,10 +8,40 @@ import { PageHeader, Section, ErrorNote } from '../../components/common';
 
 const PRESETS = [10, 20, 30, 60];
 
+function Toggle({
+  label,
+  checked,
+  disabled,
+  onChange,
+}: {
+  label: string;
+  checked: boolean;
+  disabled?: boolean;
+  onChange: (value: boolean) => void;
+}) {
+  return (
+    <label className="flex cursor-pointer items-center gap-3">
+      <span className="relative inline-flex shrink-0">
+        <input
+          type="checkbox"
+          className="peer sr-only"
+          checked={checked}
+          onChange={(e) => onChange(e.target.checked)}
+          disabled={disabled}
+        />
+        <span className="h-6 w-11 rounded-full bg-white/15 transition-colors peer-checked:bg-accent peer-focus-visible:outline-none peer-focus-visible:ring-2 peer-focus-visible:ring-accent peer-focus-visible:ring-offset-2 peer-focus-visible:ring-offset-black" />
+        <span className="pointer-events-none absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white transition-transform peer-checked:translate-x-5" />
+      </span>
+      <span className="text-sm text-white">{label}</span>
+    </label>
+  );
+}
+
 export function SettingsPage() {
   const { pending, error, run } = useAction();
   const [accent, setAccentState] = useState(getAccent());
   const [anonymous, setAnonymous] = useState(false);
+  const [chatSubmissions, setChatSubmissions] = useState(true);
   const [timer, setTimer] = useState(30);
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -23,6 +53,7 @@ export function SettingsPage() {
       .then((s) => {
         if (!alive) return;
         setAnonymous(s.anonymous);
+        setChatSubmissions(s.chatSubmissions);
         setTimer(s.defaultTimerSec);
       })
       .catch(() => {});
@@ -41,6 +72,12 @@ export function SettingsPage() {
     run(async () => {
       await ipc.setAnonymous(value);
       setAnonymous(value);
+    });
+
+  const onChatSubmissions = (value: boolean) =>
+    run(async () => {
+      await ipc.setChatSubmissions(value);
+      setChatSubmissions(value);
     });
 
   const onTimer = (value: number) =>
@@ -68,22 +105,29 @@ export function SettingsPage() {
 
       {error ? <ErrorNote message={error} /> : null}
 
-      <Section title="Voting">
-        <label className="flex cursor-pointer items-center gap-3">
-          <span className="relative inline-flex shrink-0">
-            <input
-              type="checkbox"
-              className="peer sr-only"
-              checked={anonymous}
-              onChange={(e) => onAnonymous(e.target.checked)}
+      <Section title="Voting & submissions">
+        <div className="flex flex-col gap-5">
+          <div>
+            <Toggle label="Anonymous voting" checked={anonymous} disabled={pending} onChange={onAnonymous} />
+            <p className="mt-2 text-sm text-white/40">
+              Hides voter and submitter identities from viewers (the overlay). Only counts and totals are shown; the
+              dashboard still shows who submitted each song.
+            </p>
+          </div>
+          <div>
+            <Toggle
+              label="Allow chat song submissions (!submit <url>)"
+              checked={chatSubmissions}
               disabled={pending}
+              onChange={onChatSubmissions}
             />
-            <span className="h-6 w-11 rounded-full bg-white/15 transition-colors peer-checked:bg-accent peer-focus-visible:outline-none peer-focus-visible:ring-2 peer-focus-visible:ring-accent peer-focus-visible:ring-offset-2 peer-focus-visible:ring-offset-black" />
-            <span className="pointer-events-none absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white transition-transform peer-checked:translate-x-5" />
-          </span>
-          <span className="text-sm text-white">Anonymous voting</span>
-        </label>
-        <p className="mt-2 text-sm text-white/40">Hides voter identities everywhere. Only counts and totals are shown.</p>
+            <p className="mt-2 text-sm text-white/40">
+              Viewers can add songs by typing <code className="rounded bg-white/10 px-1 text-white/70">!submit &lt;url&gt;</code> in
+              chat while the bracket hasn&apos;t started (lobby only). Hiding the submitter from viewers is controlled by the
+              Anonymous toggle above.
+            </p>
+          </div>
+        </div>
       </Section>
 
       <Section title="Default match timer">

@@ -22,6 +22,7 @@ pub async fn create_battle(
 #[tauri::command]
 pub async fn generate_bracket(mode: BattleMode, state: State<'_, AppState>) -> AppResult<()> {
     state.with_battle(|b| b.generate_bracket(mode))??;
+    state.clear_submit_ledger(); // bracket started → reset per-user submit quotas
     state.persist().await;
     Ok(())
 }

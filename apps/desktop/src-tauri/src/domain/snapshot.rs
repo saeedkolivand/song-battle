@@ -89,6 +89,8 @@ pub struct Snapshot {
 pub struct Settings {
     pub anonymous: bool,
     pub default_timer_sec: u32,
+    /// Allow viewers to add lobby songs via `!submit <url>` chat command.
+    pub chat_submissions: bool,
 }
 
 impl Default for Settings {
@@ -96,6 +98,7 @@ impl Default for Settings {
         Self {
             anonymous: false,
             default_timer_sec: 30,
+            chat_submissions: true,
         }
     }
 }
