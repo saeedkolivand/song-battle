@@ -6,6 +6,7 @@ import { SongsPage } from '../songs/SongsPage';
 import { BracketPage } from '../bracket/BracketPage';
 import { KickPage } from '../kick/KickPage';
 import { OverlayPage } from '../overlay/OverlayPage';
+import { OBSPage } from '../obs/OBSPage';
 import { SettingsPage } from '../settings/SettingsPage';
 import { LogsPage } from '../logs/LogsPage';
 import { AboutPage } from '../about/AboutPage';
@@ -18,6 +19,7 @@ export type PageId =
   | 'bracket'
   | 'kick'
   | 'overlay'
+  | 'obs'
   | 'settings'
   | 'logs'
   | 'about';
@@ -42,6 +44,7 @@ export const PAGES: PageDef[] = [
   { id: 'bracket', label: 'Bracket', component: BracketPage },
   { id: 'kick', label: 'Kick', component: KickPage },
   { id: 'overlay', label: 'Overlay', component: OverlayPage },
+  { id: 'obs', label: 'OBS', component: OBSPage },
   { id: 'settings', label: 'Settings', component: SettingsPage },
   { id: 'logs', label: 'Logs', component: LogsPage },
   { id: 'about', label: 'About', component: AboutPage },
