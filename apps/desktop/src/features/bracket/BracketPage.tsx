@@ -1,10 +1,9 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Button, Select } from '@sb/ui';
 import type { MatchView } from '@sb/types';
 import { useBattleStore } from '../../stores/battle';
 import { ipc } from '../../lib/ipc';
 import { useAction } from '../../lib/useAction';
-import { getTimerDefault, setTimerDefault } from '../../lib/settings';
 import { PageHeader, Section, ErrorNote, EmptyState, MatchPill } from '../../components/common';
 import { LiveMatch } from './LiveMatch';
 
@@ -45,19 +44,34 @@ function MiniMatch({ match }: { match: MatchView }) {
 
 export function BracketPage() {
   const battle = useBattleStore((s) => s.snapshot?.battle ?? null);
+  const anonymous = useBattleStore((s) => s.snapshot?.anonymous ?? false);
   const { pending, error, run } = useAction();
 
-  const initial = getTimerDefault();
-  const [preset, setPreset] = useState<string>(PRESETS.includes(initial) ? String(initial) : 'custom');
-  const [custom, setCustom] = useState<number>(initial);
+  const [preset, setPreset] = useState<string>('30');
+  const [custom, setCustom] = useState<number>(30);
+
+  // Seed the timer control from the persisted default (one-shot on mount).
+  useEffect(() => {
+    let alive = true;
+    ipc
+      .getSettings()
+      .then((s) => {
+        if (!alive) return;
+        setPreset(PRESETS.includes(s.defaultTimerSec) ? String(s.defaultTimerSec) : 'custom');
+        setCustom(s.defaultTimerSec);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   const seconds = preset === 'custom' ? custom : Number(preset);
   const current = battle?.currentMatch ?? null;
 
   const applyTimer = async () => {
     if (!Number.isFinite(seconds) || seconds <= 0) return;
-    const ok = await run(() => ipc.setTimer(seconds));
-    if (ok) setTimerDefault(seconds);
+    await run(() => ipc.setTimer(seconds));
   };
 
   if (!battle) {
@@ -143,7 +157,7 @@ export function BracketPage() {
 
           <Section title="Current match">
             {current ? (
-              <LiveMatch match={current} />
+              <LiveMatch match={current} anonymous={anonymous} />
             ) : battle.winner ? (
               <EmptyState title={`Winner: ${battle.winner.title}`} hint="The battle has finished." />
             ) : (

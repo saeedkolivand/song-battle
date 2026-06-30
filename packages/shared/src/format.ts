@@ -12,3 +12,8 @@ export function mmss(totalSec: number): string {
 export function clampPct(n: number): number {
   return Math.max(0, Math.min(100, Math.round(n)));
 }
+
+/** Epoch-ms timestamp → locale date+time, e.g. "30 Jun 2026, 14:05". */
+export function formatDateTime(ms: number): string {
+  return new Date(ms).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+}

@@ -3,9 +3,12 @@ import { Sidebar } from './features/nav/Sidebar';
 import { pageComponent, type PageId } from './features/nav/pages';
 import { startSnapshotStream } from './stores/battle';
 import { applyAccent } from './lib/settings';
+import { useGlobalHotkeys } from './lib/useHotkeys';
 
 export default function App() {
   const [page, setPage] = useState<PageId>('home');
+
+  useGlobalHotkeys();
 
   // Sync with external systems: restore the saved accent token and subscribe to
   // the backend snapshot stream. Dispose the listener on unmount.
@@ -30,7 +33,7 @@ export default function App() {
       <Sidebar current={page} onNavigate={setPage} />
       <main className="flex-1 overflow-y-auto">
         <div className="mx-auto max-w-5xl px-8 py-8">
-          <Page />
+          <Page onNavigate={setPage} />
         </div>
       </main>
     </div>

@@ -20,6 +20,8 @@ pub enum AppError {
     Url(#[from] url::ParseError),
     #[error("websocket: {0}")]
     Ws(#[from] tokio_tungstenite::tungstenite::Error),
+    #[error("tauri: {0}")]
+    Tauri(#[from] tauri::Error),
     #[error("unsupported url: {0}")]
     UnsupportedUrl(String),
     #[error("not found: {0}")]

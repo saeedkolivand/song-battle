@@ -4,4 +4,6 @@
 pub mod battle;
 pub mod io;
 pub mod kick;
+pub mod settings;
 pub mod song;
+pub mod tournaments;

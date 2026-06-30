@@ -6,7 +6,7 @@
 use crate::db;
 use crate::domain::{
     battle::Battle,
-    snapshot::{battle_view, ConnectionState, KickView, Snapshot},
+    snapshot::{battle_view, ConnectionState, KickView, SavedBattle, Settings, Snapshot},
     vote::VoteChoice,
 };
 use crate::error::{AppError, AppResult};
@@ -22,6 +22,7 @@ use tokio::task::JoinHandle;
 pub struct App {
     pub battle: Option<Battle>,
     pub kick: KickConn,
+    pub settings: Settings,
 }
 
 pub struct KickConn {
@@ -52,8 +53,12 @@ pub struct AppState {
 impl AppState {
     pub fn new(conn: rusqlite::Connection) -> Self {
         let (tx, _rx) = broadcast::channel::<String>(64);
+        let settings = db::get_settings(&conn).unwrap_or_default();
         Self {
-            inner: Arc::new(RwLock::new(App::default())),
+            inner: Arc::new(RwLock::new(App {
+                settings,
+                ..App::default()
+            })),
             tx,
             db: Arc::new(Mutex::new(conn)),
             seq: Arc::new(AtomicU64::new(0)),
@@ -115,6 +120,88 @@ impl AppState {
         Ok(())
     }
 
+    // ── settings ─────────────────────────────────────────────────────────────
+    pub fn settings(&self) -> Settings {
+        self.inner.read().unwrap().settings
+    }
+
+    pub fn default_timer_sec(&self) -> u32 {
+        self.inner.read().unwrap().settings.default_timer_sec
+    }
+
+    pub async fn set_anonymous(&self, anonymous: bool) -> AppResult<()> {
+        self.write_db(move |conn| db::set_anonymous(conn, anonymous))
+            .await?;
+        self.inner.write().unwrap().settings.anonymous = anonymous;
+        self.mark_dirty();
+        Ok(())
+    }
+
+    pub async fn set_default_timer(&self, sec: u32) -> AppResult<()> {
+        self.write_db(move |conn| db::set_default_timer(conn, sec))
+            .await?;
+        self.inner.write().unwrap().settings.default_timer_sec = sec;
+        Ok(())
+    }
+
+    // ── saved tournaments ────────────────────────────────────────────────────
+    pub async fn list_battles(&self) -> AppResult<Vec<SavedBattle>> {
+        self.read_db(db::list_battles).await
+    }
+
+    /// Load a saved battle and make it active. Returns false if no such id.
+    pub async fn load_saved_battle(&self, id: String) -> AppResult<bool> {
+        let battle = self.read_db(move |conn| db::load_battle(conn, &id)).await?;
+        match battle {
+            Some(b) => {
+                self.set_battle(b);
+                self.mark_dirty();
+                Ok(true)
+            }
+            None => Ok(false),
+        }
+    }
+
+    pub async fn delete_battle(&self, id: String) -> AppResult<()> {
+        let was_active = self
+            .inner
+            .read()
+            .unwrap()
+            .battle
+            .as_ref()
+            .is_some_and(|b| b.id == id);
+        let del_id = id.clone();
+        self.write_db(move |conn| db::delete_battle(conn, &del_id))
+            .await?;
+        if was_active {
+            // Replace the now-deleted active battle with the next latest (or none).
+            let latest = self.read_db(db::load_latest).await?;
+            self.inner.write().unwrap().battle = latest;
+        }
+        self.mark_dirty();
+        Ok(())
+    }
+
+    /// Run a blocking SQLite read off the async runtime.
+    async fn read_db<T, F>(&self, f: F) -> AppResult<T>
+    where
+        T: Send + 'static,
+        F: FnOnce(&rusqlite::Connection) -> AppResult<T> + Send + 'static,
+    {
+        let db = self.db.clone();
+        tokio::task::spawn_blocking(move || f(&db.lock().unwrap()))
+            .await
+            .map_err(|e| AppError::Other(format!("db task: {e}")))?
+    }
+
+    /// Run a blocking SQLite write off the async runtime.
+    async fn write_db<F>(&self, f: F) -> AppResult<()>
+    where
+        F: FnOnce(&rusqlite::Connection) -> AppResult<()> + Send + 'static,
+    {
+        self.read_db(f).await
+    }
+
     // ── dirty flag + broadcast ───────────────────────────────────────────────
     pub fn mark_dirty(&self) {
         self.dirty.store(true, Ordering::SeqCst);
@@ -127,11 +214,15 @@ impl AppState {
         let app = self.inner.read().unwrap();
         Snapshot {
             seq,
-            battle: app.battle.as_ref().map(battle_view),
+            battle: app
+                .battle
+                .as_ref()
+                .map(|b| battle_view(b, app.settings.anonymous)),
             kick: KickView {
                 state: app.kick.state,
                 channel: app.kick.channel.clone(),
             },
+            anonymous: app.settings.anonymous,
         }
     }
 

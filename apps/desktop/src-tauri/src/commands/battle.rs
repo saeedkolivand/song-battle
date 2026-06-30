@@ -10,7 +10,11 @@ pub async fn create_battle(
     theme: String,
     state: State<'_, AppState>,
 ) -> AppResult<()> {
-    state.set_battle(Battle::new(title, description, theme));
+    // No explicit per-battle timer yet → seed from the persisted default. A later
+    // `set_timer` overrides it; `start_match` then uses the battle's duration.
+    let mut battle = Battle::new(title, description, theme);
+    battle.set_timer(state.default_timer_sec());
+    state.set_battle(battle);
     state.persist().await;
     Ok(())
 }
