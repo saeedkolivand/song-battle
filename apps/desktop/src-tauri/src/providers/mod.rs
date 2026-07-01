@@ -3,6 +3,7 @@
 //! `AppState` (so providers stay decoupled from app state).
 
 pub mod kick;
+pub mod kick_official;
 pub mod sim;
 
 use crate::domain::snapshot::ConnectionState;

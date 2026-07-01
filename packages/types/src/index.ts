@@ -27,11 +27,7 @@ export interface MediaMetadata {
 }
 
 export type ConnectionState =
-  | 'disconnected'
-  | 'connecting'
-  | 'connected'
-  | 'reconnecting'
-  | 'error';
+  'disconnected' | 'connecting' | 'connected' | 'reconnecting' | 'error';
 
 export interface ChatUser {
   userId: string;
@@ -121,6 +117,13 @@ export interface BattleView {
 export interface KickView {
   state: ConnectionState;
   channel: string | null;
+}
+
+// Official Kick API (OAuth) auth state — separate from the unofficial (Pusher)
+// `KickView` above. `subscriptionActive` is unused until K2 wires the webhook.
+export interface KickOfficialStatus {
+  authorized: boolean;
+  subscriptionActive: boolean;
 }
 
 export interface Snapshot {
