@@ -6,12 +6,14 @@ use crate::error::AppResult;
 use crate::providers::kick_official;
 use crate::state::AppState;
 use axum::{
+    body::Bytes,
     extract::{
         ws::{Message, WebSocket, WebSocketUpgrade},
         Query, State,
     },
+    http::HeaderMap,
     response::{Html, IntoResponse, Response},
-    routing::get,
+    routing::{get, post},
     Router,
 };
 use rust_embed::RustEmbed;
@@ -41,6 +43,7 @@ pub async fn serve_on(listener: TcpListener, state: AppState) -> AppResult<()> {
     let app = Router::new()
         .route("/ws", get(ws_handler))
         .route("/oauth/callback", get(oauth_callback))
+        .route("/kick/webhook", post(kick_webhook))
         .fallback(static_handler)
         .with_state(state);
     tracing::info!("overlay server on http://{}/", listener.local_addr()?);
@@ -150,6 +153,7 @@ async fn oauth_callback(
     };
 
     let expires_at = kick_official::expiry_from(tokens.expires_in);
+    let access_token = tokens.access_token.clone();
     if let Err(e) = state
         .set_kick_tokens(tokens.access_token, tokens.refresh_token, expires_at)
         .await
@@ -159,8 +163,19 @@ async fn oauth_callback(
             .into_response();
     }
 
-    // K2: create the events:subscribe webhook subscription here and persist
-    // its id via state.set_kick_subscription(...).
+    // Auto-subscribe to chat webhooks. Best-effort: it needs the app-global
+    // webhook URL configured at dev.kick.com, so a failure here just means
+    // "authorized but not yet receiving" — the user sets the URL and reconnects.
+    match kick_official::subscribe_chat(&access_token).await {
+        Ok(sub_id) => {
+            if let Err(e) = state.set_kick_subscription(Some(sub_id)).await {
+                tracing::error!("kick oauth: failed to persist subscription id: {e}");
+            }
+        }
+        Err(e) => tracing::warn!(
+            "kick oauth: auto-subscribe failed (set the webhook URL at dev.kick.com, then reconnect): {e}"
+        ),
+    }
 
     state.emit_event("kick-auth");
     tracing::info!("kick oauth: connected");
@@ -171,6 +186,62 @@ fn oauth_html(msg: &str) -> Html<String> {
     Html(format!(
         "<html><body style=\"font-family:sans-serif;text-align:center;margin-top:3rem\"><p>{msg}</p></body></html>"
     ))
+}
+
+/// Official Kick chat delivery (K2). This endpoint is PUBLICLY reachable through
+/// the user's tunnel, so the RSA-SHA256 signature check is mandatory and fails
+/// closed — without it anyone could POST fake votes. Order matters: verify the
+/// signature BEFORE the replay check so a forged request can't poison the dedupe
+/// set. Always 200 once verified so Kick doesn't retry a message we've handled.
+async fn kick_webhook(State(state): State<AppState>, headers: HeaderMap, body: Bytes) -> Response {
+    use axum::http::StatusCode;
+
+    let header = |name: &str| {
+        headers
+            .get(name)
+            .and_then(|v| v.to_str().ok())
+            .map(str::to_owned)
+    };
+    let (Some(id), Some(ts), Some(sig)) = (
+        header("Kick-Event-Message-Id"),
+        header("Kick-Event-Message-Timestamp"),
+        header("Kick-Event-Signature"),
+    ) else {
+        return StatusCode::BAD_REQUEST.into_response();
+    };
+
+    let pem = match kick_official::public_key().await {
+        Ok(p) => p,
+        Err(e) => {
+            tracing::error!("kick webhook: public key unavailable: {e}");
+            return StatusCode::SERVICE_UNAVAILABLE.into_response();
+        }
+    };
+    if !kick_official::verify_webhook(pem, &id, &ts, &body, &sig) {
+        tracing::warn!("kick webhook: invalid signature (id={id}) — rejected");
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+
+    // Verified. Drop Kick's redeliveries so a retried POST can't double-count.
+    if !state.webhook_id_is_new(&id) {
+        return StatusCode::OK.into_response();
+    }
+
+    // Only chat messages matter; parse_chat_event returns None for anything else.
+    match serde_json::from_slice::<serde_json::Value>(&body) {
+        Ok(v) => {
+            if let Some(m) = kick_official::parse_chat_event(&v) {
+                crate::commands::kick::apply_chat_message(
+                    &state,
+                    m,
+                    &crate::commands::kick::submit_fetch_sem(),
+                )
+                .await;
+            }
+        }
+        Err(e) => tracing::warn!("kick webhook: body was not JSON: {e}"),
+    }
+    StatusCode::OK.into_response()
 }
 
 async fn static_handler(uri: axum::http::Uri) -> Response {
@@ -465,5 +536,84 @@ mod tests {
         let auth = state.get_kick_auth().await.unwrap();
         assert_eq!(auth.access_token.as_deref(), Some("AT-live"));
         assert_eq!(auth.refresh_token.as_deref(), Some("RT-live"));
+    }
+
+    // ── /kick/webhook (K2) ───────────────────────────────────────────────────
+    // The endpoint is public through the tunnel, so the signature gate is the
+    // security boundary: a forged POST must be rejected, a correctly-signed one
+    // accepted, and a redelivery deduped.
+    #[tokio::test]
+    async fn webhook_rejects_forged_signature_and_accepts_a_valid_one() {
+        use base64::{engine::general_purpose::STANDARD, Engine as _};
+        use rsa::pkcs1v15::SigningKey;
+        use rsa::pkcs8::{EncodePublicKey, LineEnding};
+        use rsa::signature::{SignatureEncoding, Signer};
+        use sha2::Sha256;
+
+        // Stand-in for Kick's signing key; seed the handler's key cache with it.
+        let mut rng = rand::thread_rng();
+        let priv_key = rsa::RsaPrivateKey::new(&mut rng, 2048).unwrap();
+        let pem = rsa::RsaPublicKey::from(&priv_key)
+            .to_public_key_pem(LineEnding::LF)
+            .unwrap();
+        kick_official::set_public_key_for_test(pem);
+
+        let state = AppState::test();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let srv = state.clone();
+        tokio::spawn(async move {
+            let _ = serve_on(listener, srv).await;
+        });
+
+        let body = br#"{"message_id":"m1","content":"1","sender":{"user_id":7,"username":"bob","identity":null}}"#;
+        let (id, ts) = ("01HWEBHOOK", "2026-07-01T00:00:00Z");
+        let mut signed = Vec::new();
+        signed.extend_from_slice(id.as_bytes());
+        signed.push(b'.');
+        signed.extend_from_slice(ts.as_bytes());
+        signed.push(b'.');
+        signed.extend_from_slice(body);
+        let good_sig =
+            STANDARD.encode(SigningKey::<Sha256>::new(priv_key).sign(&signed).to_bytes());
+
+        let post = |sig: String| {
+            crate::net::shared()
+                .post(format!("http://{addr}/kick/webhook"))
+                .header("Kick-Event-Message-Id", id)
+                .header("Kick-Event-Message-Timestamp", ts)
+                .header("Kick-Event-Signature", sig)
+                .body(body.to_vec())
+                .send()
+        };
+
+        // Forged signature → 401.
+        let forged = post("Zm9yZ2Vk".into()).await.unwrap();
+        assert_eq!(forged.status(), reqwest::StatusCode::UNAUTHORIZED);
+
+        // Correctly signed → 200.
+        let ok = post(good_sig.clone()).await.unwrap();
+        assert_eq!(ok.status(), reqwest::StatusCode::OK);
+
+        // Redelivery of the same message id → still 200 (deduped, not reprocessed).
+        let replay = post(good_sig).await.unwrap();
+        assert_eq!(replay.status(), reqwest::StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn webhook_without_signature_headers_is_rejected() {
+        let state = AppState::test();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let _ = serve_on(listener, state).await;
+        });
+        let resp = crate::net::shared()
+            .post(format!("http://{addr}/kick/webhook"))
+            .body("{}")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), reqwest::StatusCode::BAD_REQUEST);
     }
 }

@@ -12,6 +12,7 @@ use crate::domain::{
     vote::VoteChoice,
 };
 use crate::error::{AppError, AppResult};
+use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
@@ -65,6 +66,8 @@ pub struct AppState {
     app_handle: Arc<Mutex<Option<tauri::AppHandle>>>,
     kick_tasks: Arc<Mutex<Vec<JoinHandle<()>>>>,
     pending_oauth: Arc<Mutex<Option<PendingOauth>>>,
+    /// Recently-seen webhook message ids, to drop Kick's redeliveries (K2).
+    webhook_ids: Arc<Mutex<VecDeque<String>>>,
 }
 
 impl AppState {
@@ -83,7 +86,24 @@ impl AppState {
             app_handle: Arc::new(Mutex::new(None)),
             kick_tasks: Arc::new(Mutex::new(Vec::new())),
             pending_oauth: Arc::new(Mutex::new(None)),
+            webhook_ids: Arc::new(Mutex::new(VecDeque::new())),
         }
+    }
+
+    /// Record a webhook message id; returns `true` if it's new (should be
+    /// processed) or `false` if it's a redelivery we've already handled.
+    // ponytail: bounded FIFO of the last 512 ids, linear scan — trivial at chat
+    // webhook rates; swap for a HashSet+queue only if that ever gets hot.
+    pub fn webhook_id_is_new(&self, id: &str) -> bool {
+        let mut q = self.webhook_ids.lock().unwrap();
+        if q.iter().any(|x| x == id) {
+            return false;
+        }
+        if q.len() >= 512 {
+            q.pop_front();
+        }
+        q.push_back(id.to_owned());
+        true
     }
 
     pub fn set_app_handle(&self, handle: tauri::AppHandle) {
@@ -513,5 +533,13 @@ mod tests {
     fn oauth_take_without_a_pending_login_is_none() {
         let state = AppState::test();
         assert!(state.take_oauth("anything").is_none());
+    }
+
+    #[test]
+    fn webhook_ids_dedupe_replays() {
+        let state = AppState::test();
+        assert!(state.webhook_id_is_new("id-a"), "first sighting is new");
+        assert!(!state.webhook_id_is_new("id-a"), "a replay is not new");
+        assert!(state.webhook_id_is_new("id-b"), "a different id is new");
     }
 }

@@ -151,6 +151,167 @@ pub fn expiry_from(expires_in: u64) -> i64 {
     now.saturating_add(expires_in).min(i64::MAX as u64) as i64
 }
 
+// ── webhooks + event subscription (K2) ──────────────────────────────────────
+
+const PUBLIC_KEY_URL: &str = "https://api.kick.com/public/v1/public-key";
+const SUBSCRIPTIONS_URL: &str = "https://api.kick.com/public/v1/events/subscriptions";
+
+/// Kick's webhook-signing public key is fixed, so fetch it once and cache it.
+static PUBLIC_KEY: tokio::sync::OnceCell<String> = tokio::sync::OnceCell::const_new();
+
+/// The cached PEM (`-----BEGIN PUBLIC KEY-----`), fetched on first use.
+pub async fn public_key() -> AppResult<&'static str> {
+    let pem = PUBLIC_KEY.get_or_try_init(fetch_public_key).await?;
+    Ok(pem.as_str())
+}
+
+/// Seed the public-key cache with a test key so the webhook handler can be
+/// exercised without reaching api.kick.com (set once).
+#[cfg(test)]
+pub(crate) fn set_public_key_for_test(pem: String) {
+    let _ = PUBLIC_KEY.set(pem);
+}
+
+async fn fetch_public_key() -> AppResult<String> {
+    #[derive(Deserialize)]
+    struct Resp {
+        data: KeyData,
+    }
+    #[derive(Deserialize)]
+    struct KeyData {
+        public_key: String,
+    }
+    let resp: Resp = net::shared()
+        .get(PUBLIC_KEY_URL)
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await?;
+    Ok(resp.data.public_key)
+}
+
+/// Verify a Kick webhook's RSA-SHA256 (PKCS#1 v1.5) signature. The signed
+/// payload is `{message_id}.{timestamp}.{raw_body}`; `signature_b64` is the
+/// standard-base64 `Kick-Event-Signature` header. Any malformed input → `false`
+/// (fail closed) — a bad signature must never be treated as authentic.
+pub fn verify_webhook(
+    public_key_pem: &str,
+    msg_id: &str,
+    timestamp: &str,
+    body: &[u8],
+    signature_b64: &str,
+) -> bool {
+    use base64::engine::general_purpose::STANDARD;
+    use rsa::pkcs1v15::{Signature, VerifyingKey};
+    use rsa::pkcs8::DecodePublicKey;
+    use rsa::signature::Verifier;
+    use rsa::RsaPublicKey;
+
+    let Ok(pubkey) = RsaPublicKey::from_public_key_pem(public_key_pem) else {
+        return false;
+    };
+    let Ok(sig_bytes) = STANDARD.decode(signature_b64) else {
+        return false;
+    };
+    let Ok(sig) = Signature::try_from(sig_bytes.as_slice()) else {
+        return false;
+    };
+    let mut message = Vec::with_capacity(msg_id.len() + timestamp.len() + body.len() + 2);
+    message.extend_from_slice(msg_id.as_bytes());
+    message.push(b'.');
+    message.extend_from_slice(timestamp.as_bytes());
+    message.push(b'.');
+    message.extend_from_slice(body);
+    VerifyingKey::<Sha256>::new(pubkey)
+        .verify(&message, &sig)
+        .is_ok()
+}
+
+/// Parse a `chat.message.sent` webhook body into our `ChatMessage`. `None` if it
+/// isn't a chat message (missing sender/content) — the handler then ignores it.
+pub fn parse_chat_event(v: &serde_json::Value) -> Option<crate::providers::ChatMessage> {
+    use crate::providers::{now_ms, ChatMessage, ChatUser};
+
+    let sender = v.get("sender")?;
+    // user_id is a JSON number; accept a string too, defensively.
+    let user_id = sender.get("user_id").and_then(|u| {
+        u.as_i64()
+            .map(|n| n.to_string())
+            .or_else(|| u.as_str().map(str::to_owned))
+    })?;
+    let username = sender.get("username")?.as_str()?.to_owned();
+    let text = v.get("content")?.as_str()?.to_owned();
+    let id = v
+        .get("message_id")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("")
+        .to_owned();
+
+    // Roles come from the sender's identity badges (identity may be null).
+    let badges = sender
+        .get("identity")
+        .and_then(|i| i.get("badges"))
+        .and_then(serde_json::Value::as_array);
+    let has = |t: &str| {
+        badges.is_some_and(|arr| {
+            arr.iter()
+                .any(|b| b.get("type").and_then(serde_json::Value::as_str) == Some(t))
+        })
+    };
+
+    Some(ChatMessage {
+        id,
+        user: ChatUser {
+            user_id,
+            username: username.clone(),
+            display_name: username,
+            is_mod: has("moderator") || has("broadcaster"),
+            is_sub: has("subscriber"),
+            is_vip: has("vip"),
+        },
+        text,
+        ts: now_ms(),
+    })
+}
+
+/// Subscribe the authorized broadcaster to `chat.message.sent` webhooks. The
+/// callback URL is the app-global one set at dev.kick.com (not per-subscription),
+/// so it isn't sent here. Returns the new subscription id.
+pub async fn subscribe_chat(access_token: &str) -> AppResult<String> {
+    let body = serde_json::json!({
+        "events": [{ "name": "chat.message.sent", "version": 1 }],
+        "method": "webhook",
+    });
+    let v: serde_json::Value = net::shared()
+        .post(SUBSCRIPTIONS_URL)
+        .bearer_auth(access_token)
+        .json(&body)
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await?;
+    v.get("data")
+        .and_then(|d| d.get(0))
+        .and_then(|e| e.get("subscription_id"))
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_owned)
+        .ok_or_else(|| AppError::Other("subscribe: no subscription_id in response".into()))
+}
+
+/// Best-effort remote unsubscribe (local logout clears tokens regardless).
+pub async fn unsubscribe(access_token: &str, subscription_id: &str) -> AppResult<()> {
+    net::shared()
+        .delete(SUBSCRIPTIONS_URL)
+        .query(&[("id", subscription_id)])
+        .bearer_auth(access_token)
+        .send()
+        .await?
+        .error_for_status()?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -257,5 +418,88 @@ mod tests {
         // A hostile/huge `expires_in` must clamp to i64::MAX, never wrap into a
         // negative (already-expired) timestamp.
         assert_eq!(expiry_from(u64::MAX), i64::MAX);
+    }
+
+    #[test]
+    fn verify_webhook_accepts_valid_signature_and_rejects_tampering() {
+        use base64::engine::general_purpose::STANDARD;
+        use base64::Engine as _;
+        use rsa::pkcs1v15::SigningKey;
+        use rsa::pkcs8::{EncodePublicKey, LineEnding};
+        use rsa::signature::{SignatureEncoding, Signer};
+
+        // A throwaway keypair stands in for Kick's signing key.
+        let mut rng = rand::thread_rng();
+        let priv_key = rsa::RsaPrivateKey::new(&mut rng, 2048).unwrap();
+        let pub_pem = rsa::RsaPublicKey::from(&priv_key)
+            .to_public_key_pem(LineEnding::LF)
+            .unwrap();
+
+        let (id, ts, body) = ("01H0MSG", "2026-07-01T00:00:00Z", br#"{"content":"1"}"#);
+        let mut signed = Vec::new();
+        signed.extend_from_slice(id.as_bytes());
+        signed.push(b'.');
+        signed.extend_from_slice(ts.as_bytes());
+        signed.push(b'.');
+        signed.extend_from_slice(body);
+        let sig_b64 = STANDARD.encode(SigningKey::<Sha256>::new(priv_key).sign(&signed).to_bytes());
+
+        assert!(
+            verify_webhook(&pub_pem, id, ts, body, &sig_b64),
+            "valid signature"
+        );
+        // Any change to the signed inputs must fail closed:
+        assert!(
+            !verify_webhook(&pub_pem, id, ts, br#"{"content":"2"}"#, &sig_b64),
+            "tampered body"
+        );
+        assert!(
+            !verify_webhook(&pub_pem, "01H0OTHER", ts, body, &sig_b64),
+            "wrong message id"
+        );
+        assert!(
+            !verify_webhook(&pub_pem, id, ts, body, "not-base64!!"),
+            "garbage signature"
+        );
+    }
+
+    #[test]
+    fn parse_chat_event_extracts_text_and_roles() {
+        let v = serde_json::json!({
+            "message_id": "01H0ABC",
+            "content": "!vote 1",
+            "sender": {
+                "user_id": 987654321i64,
+                "username": "voter_bob",
+                "is_anonymous": false,
+                "identity": {
+                    "badges": [
+                        { "text": "Moderator", "type": "moderator" },
+                        { "text": "Subscriber", "type": "subscriber", "count": 3 }
+                    ]
+                }
+            }
+        });
+        let m = parse_chat_event(&v).expect("a chat message");
+        assert_eq!(m.id, "01H0ABC");
+        assert_eq!(m.text, "!vote 1");
+        assert_eq!(m.user.user_id, "987654321"); // number → string
+        assert_eq!(m.user.username, "voter_bob");
+        assert!(m.user.is_mod);
+        assert!(m.user.is_sub);
+        assert!(!m.user.is_vip);
+    }
+
+    #[test]
+    fn parse_chat_event_handles_null_identity_and_ignores_non_chat() {
+        // Anonymous sender: identity null → no roles, still a valid message.
+        let anon = serde_json::json!({
+            "message_id": "x", "content": "hi",
+            "sender": { "user_id": 5, "username": "anon", "identity": null }
+        });
+        let m = parse_chat_event(&anon).expect("still a chat message");
+        assert!(!m.user.is_mod && !m.user.is_sub && !m.user.is_vip);
+        // Missing content/sender → not a chat message.
+        assert!(parse_chat_event(&serde_json::json!({ "foo": "bar" })).is_none());
     }
 }

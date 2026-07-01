@@ -4,7 +4,7 @@ use crate::domain::vote::{classify_chat, ChatAction};
 use crate::error::{AppError, AppResult};
 use crate::providers::kick::{validate_channel, KickProvider};
 use crate::providers::kick_official;
-use crate::providers::{now_ms, ChatProvider, ProviderEvent};
+use crate::providers::{now_ms, ChatMessage, ChatProvider, ProviderEvent};
 use crate::state::AppState;
 use std::sync::Arc;
 use tauri::State;
@@ -45,64 +45,73 @@ pub async fn connect_kick(
                     app.set_kick_state(s);
                     app.mark_dirty();
                 }
-                ProviderEvent::Message(m) => {
-                    let who = m.user.username.clone();
-                    tracing::info!("kick chat: {who} -> '{}'", m.text);
-                    match classify_chat(m.user.is_mod, &m.text) {
-                        ChatAction::Vote(choice) => {
-                            // counted=false means no match is Active / its timer isn't running.
-                            let counted = app.cast_vote(m.user.user_id, choice, now_ms());
-                            tracing::info!("kick vote from {who}: counted={counted}");
-                            if counted {
-                                app.mark_dirty();
-                            }
-                        }
-                        // Anyone may submit a lobby song. Gate synchronously (cooldown /
-                        // caps / dedup), then resolve oEmbed OFF the loop — never await
-                        // the fetch here or it head-of-line-blocks vote ingestion.
-                        ChatAction::Submit(raw_url) => {
-                            if let Some((source, url)) =
-                                app.gate_submission(&m.user.user_id, &raw_url, now_ms())
-                            {
-                                let app = app.clone();
-                                let sem = fetch_sem.clone();
-                                let submitter = m.user.username.clone();
-                                tokio::spawn(async move {
-                                    let Ok(_permit) = sem.acquire().await else {
-                                        return;
-                                    };
-                                    match crate::media::fetch(source, &url).await {
-                                        // Drop on failure — a raw URL as a title would
-                                        // render on the overlay (no placeholder).
-                                        Ok(meta) => app.add_submitted_song(meta, submitter).await,
-                                        Err(e) => {
-                                            tracing::warn!("submit fetch failed ({url}): {e}")
-                                        }
-                                    }
-                                });
-                            }
-                        }
-                        // Mod-only: reset the current match's votes (not persisted state).
-                        ChatAction::ResetVotes => {
-                            if app.with_battle(Battle::reset_votes).is_ok() {
-                                app.mark_dirty();
-                            }
-                        }
-                        // Mod-only: skip resolves the match → persist the bracket change.
-                        ChatAction::Skip => {
-                            if app.with_battle(Battle::skip_match).is_ok() {
-                                app.persist().await;
-                            }
-                        }
-                        ChatAction::Ignore => {}
-                    }
-                }
+                ProviderEvent::Message(m) => apply_chat_message(&app, m, &fetch_sem).await,
             }
         }
     });
 
     state.set_kick_tasks(vec![run, consume]);
     Ok(())
+}
+
+/// Apply one chat message to the battle: vote / `!submit` / mod reset-skip.
+/// Shared by the unofficial Pusher consume loop and the official webhook handler
+/// so the two providers can never drift in how they treat chat.
+pub async fn apply_chat_message(app: &AppState, m: ChatMessage, fetch_sem: &Arc<Semaphore>) {
+    let who = m.user.username.clone();
+    tracing::info!("kick chat: {who} -> '{}'", m.text);
+    match classify_chat(m.user.is_mod, &m.text) {
+        ChatAction::Vote(choice) => {
+            // counted=false means no match is Active / its timer isn't running.
+            let counted = app.cast_vote(m.user.user_id, choice, now_ms());
+            tracing::info!("kick vote from {who}: counted={counted}");
+            if counted {
+                app.mark_dirty();
+            }
+        }
+        // Anyone may submit a lobby song. Gate synchronously (cooldown / caps /
+        // dedup), then resolve oEmbed OFF the loop — never await the fetch here
+        // or it head-of-line-blocks vote ingestion.
+        ChatAction::Submit(raw_url) => {
+            if let Some((source, url)) = app.gate_submission(&m.user.user_id, &raw_url, now_ms()) {
+                let app = app.clone();
+                let sem = fetch_sem.clone();
+                let submitter = m.user.username.clone();
+                tokio::spawn(async move {
+                    let Ok(_permit) = sem.acquire().await else {
+                        return;
+                    };
+                    match crate::media::fetch(source, &url).await {
+                        // Drop on failure — a raw URL as a title would render on
+                        // the overlay (no placeholder).
+                        Ok(meta) => app.add_submitted_song(meta, submitter).await,
+                        Err(e) => tracing::warn!("submit fetch failed ({url}): {e}"),
+                    }
+                });
+            }
+        }
+        // Mod-only: reset the current match's votes (not persisted state).
+        ChatAction::ResetVotes => {
+            if app.with_battle(Battle::reset_votes).is_ok() {
+                app.mark_dirty();
+            }
+        }
+        // Mod-only: skip resolves the match → persist the bracket change.
+        ChatAction::Skip => {
+            if app.with_battle(Battle::skip_match).is_ok() {
+                app.persist().await;
+            }
+        }
+        ChatAction::Ignore => {}
+    }
+}
+
+/// One process-wide cap on concurrent oEmbed fetches spawned off chat, shared by
+/// both providers (the webhook handler has no per-connection semaphore of its own).
+pub fn submit_fetch_sem() -> Arc<Semaphore> {
+    static SEM: std::sync::OnceLock<Arc<Semaphore>> = std::sync::OnceLock::new();
+    SEM.get_or_init(|| Arc::new(Semaphore::new(SUBMIT_FETCH_CONCURRENCY)))
+        .clone()
 }
 
 #[tauri::command]
@@ -165,9 +174,18 @@ pub async fn kick_official_status(state: State<'_, AppState>) -> AppResult<KickO
     })
 }
 
-/// Local logout only — K2 also revokes the remote webhook subscription before
-/// calling this.
+/// Disconnect the official provider: revoke the remote webhook subscription
+/// (best-effort) then wipe local creds/tokens.
 #[tauri::command]
 pub async fn kick_official_disconnect(state: State<'_, AppState>) -> AppResult<()> {
+    let auth = state.get_kick_auth().await?;
+    if let (Some(token), Some(sub)) = (
+        auth.access_token.as_deref(),
+        auth.subscription_id.as_deref(),
+    ) {
+        if let Err(e) = kick_official::unsubscribe(token, sub).await {
+            tracing::warn!("kick disconnect: remote unsubscribe failed: {e}");
+        }
+    }
     state.clear_kick_auth().await
 }
