@@ -99,8 +99,35 @@ scene names. With auto-switch on, the app changes scenes as the battle state cha
 
 ## Kick connection
 
-On the **Kick** page, enter your channel slug and connect. Voting works with **zero setup** — it reads
-public chat over Kick's Pusher WebSocket (anonymous read). No login required for voting.
+The **Kick** page offers two providers — pick either, both feed the same vote tally.
+
+### Unofficial (zero setup — recommended)
+
+Enter your channel slug and **Connect**. It reads public chat over Kick's Pusher WebSocket (anonymous
+read) — no login, no tunnel, nothing to host. If connecting fails because Kick's channel lookup is
+Cloudflare-blocked (a `403`), paste your numeric **chatroom ID** in the optional field (find it at
+`https://kick.com/api/v2/channels/<your-slug>` → `chatroom.id`) — only the lookup is blocked, not the
+chat stream.
+
+### Official (Kick API — needs a public tunnel)
+
+Uses Kick's official OAuth + webhooks. Chat is delivered only via webhooks, so Kick must reach your PC
+through a public HTTPS URL. One-time setup:
+
+1. At **[dev.kick.com](https://dev.kick.com)** create an app → copy the **Client ID** and **Client
+   Secret**. Add the redirect URI `http://localhost:31337/oauth/callback`.
+2. Expose the app's local receiver with your own stable tunnel, e.g.
+   `cloudflared tunnel --url http://localhost:31337` (or an ngrok static domain), and set the app's
+   **Webhook URL** at dev.kick.com to `https://<your-tunnel-host>/kick/webhook`.
+3. On the Kick page → **Official** → paste Client ID / Secret → **Login with Kick** → approve in the
+   browser. The panel should show **authorized** + **subscribed**.
+
+The app does **not** manage the tunnel — run your own. Signature-verified (RSA-SHA256), replay-deduped,
+and time-bounded (±5 min). If it shows _authorized_ but _not subscribed_, the webhook URL isn't set at
+dev.kick.com yet — set it, then Disconnect → Login again.
+
+> GitHub Pages can't host the webhook (it's static-only and can't reach your PC). If you'd rather avoid a
+> tunnel entirely, use the Unofficial provider — it connects outbound and needs no public URL.
 
 **Chat commands:** vote `1` / `2` / `!1` / `!2` / `!vote 1` / `!vote 2`; submit `!submit <url>` /
 `!add <url>` (lobby only); moderators `!reset` / `!skip`.
