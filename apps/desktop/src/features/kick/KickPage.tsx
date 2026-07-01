@@ -71,7 +71,10 @@ export function KickPage() {
       const url = await ipc.kickOauthStart(clientId.trim(), clientSecret.trim());
       await openUrl(url);
     });
-    if (ok) refreshStatus();
+    if (ok) {
+      setClientSecret(''); // backend has persisted it — don't keep the secret in component state
+      refreshStatus();
+    }
   };
 
   const disconnect = async () => {

@@ -142,11 +142,13 @@ pub(crate) fn set_token_url_for_test(url: String) {
 }
 
 /// Absolute unix-seconds expiry from a token response's relative `expires_in`.
+/// `expires_in` is attacker-influenced (comes off the token response), so the
+/// arithmetic saturates instead of wrapping into a negative (already-expired) i64.
 pub fn expiry_from(expires_in: u64) -> i64 {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| d.as_secs());
-    (now + expires_in) as i64
+    now.saturating_add(expires_in).min(i64::MAX as u64) as i64
 }
 
 #[cfg(test)]
@@ -248,5 +250,12 @@ mod tests {
         let a = expiry_from(0);
         let b = expiry_from(120);
         assert_eq!(b - a, 120);
+    }
+
+    #[test]
+    fn expiry_from_saturates_instead_of_wrapping_negative() {
+        // A hostile/huge `expires_in` must clamp to i64::MAX, never wrap into a
+        // negative (already-expired) timestamp.
+        assert_eq!(expiry_from(u64::MAX), i64::MAX);
     }
 }

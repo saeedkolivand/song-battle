@@ -1,7 +1,7 @@
 use crate::domain::battle::Battle;
 use crate::domain::snapshot::ConnectionState;
 use crate::domain::vote::{classify_chat, ChatAction};
-use crate::error::AppResult;
+use crate::error::{AppError, AppResult};
 use crate::providers::kick::{validate_channel, KickProvider};
 use crate::providers::kick_official;
 use crate::providers::{now_ms, ChatProvider, ProviderEvent};
@@ -132,14 +132,23 @@ pub async fn kick_oauth_start(
     client_secret: String,
     state: State<'_, AppState>,
 ) -> AppResult<String> {
+    // Trust boundary: the frontend disables empty inputs, but this command is
+    // callable directly — don't persist blank creds or build a bogus login URL.
+    let client_id = client_id.trim();
+    let client_secret = client_secret.trim();
+    if client_id.is_empty() || client_secret.is_empty() {
+        return Err(AppError::Invalid(
+            "client id and client secret are required".into(),
+        ));
+    }
     state
-        .set_kick_creds(client_id.clone(), client_secret.clone())
+        .set_kick_creds(client_id.to_owned(), client_secret.to_owned())
         .await?;
     let (verifier, challenge) = kick_official::pkce();
     let csrf_state = kick_official::random_state();
     state.start_oauth(verifier, csrf_state.clone());
     Ok(kick_official::authorize_url(
-        &client_id,
+        client_id,
         &kick_official::redirect_uri(),
         OFFICIAL_SCOPE,
         &csrf_state,

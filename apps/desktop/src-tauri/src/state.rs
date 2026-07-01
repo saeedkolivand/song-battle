@@ -46,6 +46,10 @@ impl Default for KickConn {
 
 /// The (verifier, state) pair for an in-flight official-Kick OAuth login.
 /// RAM-only — a stale login after an app restart just needs a retry.
+// ponytail: no TTL. The slot is single-use, guarded by a 128-bit unguessable
+// `state`, reachable only over loopback, overwritten by the next login, and
+// cleared on success — an abandoned entry carries no real risk. Add a timestamp
+// + expiry here only if that trust boundary ever widens (e.g. non-loopback).
 struct PendingOauth {
     verifier: String,
     state: String,

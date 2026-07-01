@@ -415,12 +415,21 @@ mod tests {
         tokio::spawn(async move {
             let app = Router::new().route(
                 "/oauth/token",
-                post(|| async {
-                    Json(serde_json::json!({
-                        "access_token": "AT-live",
-                        "refresh_token": "RT-live",
-                        "expires_in": 3600
-                    }))
+                post(|body: String| async move {
+                    // The callback must forward the auth code + the consumed PKCE
+                    // verifier; if it ever stops, this 400s → the test's
+                    // "Kick connected" assertion fails instead of silently passing.
+                    if body.contains("code=the-code") && body.contains("code_verifier=verifier-xyz")
+                    {
+                        Json(serde_json::json!({
+                            "access_token": "AT-live",
+                            "refresh_token": "RT-live",
+                            "expires_in": 3600
+                        }))
+                        .into_response()
+                    } else {
+                        axum::http::StatusCode::BAD_REQUEST.into_response()
+                    }
                 }),
             );
             let _ = axum::serve(token_listener, app).await;

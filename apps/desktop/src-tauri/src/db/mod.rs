@@ -690,8 +690,10 @@ mod tests {
         clear_kick_auth(&conn).unwrap();
         let auth = get_kick_auth(&conn).unwrap();
         assert!(auth.client_id.is_none());
+        assert!(auth.client_secret.is_none());
         assert!(auth.access_token.is_none());
         assert!(auth.refresh_token.is_none());
+        assert!(auth.expires_at.is_none());
         assert!(auth.subscription_id.is_none());
     }
 
