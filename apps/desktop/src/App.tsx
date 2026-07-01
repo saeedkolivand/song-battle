@@ -1,15 +1,16 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef } from 'react';
 import { Sidebar } from './features/nav/Sidebar';
 import { PAGES, pageComponent, type PageId } from './features/nav/pages';
 import { startSnapshotStream } from './stores/battle';
 import { applyAccent } from './lib/settings';
+import { usePersistentState } from './lib/usePersistentState';
 import { useGlobalHotkeys } from './lib/useHotkeys';
 import { useObsAutoSwitch } from './features/obs/useObs';
 import { useDevRecorder } from './features/dev/useDevRecorder';
 import { isTauri } from './lib/ipc';
 
 export default function App() {
-  const [page, setPage] = useState<PageId>('home');
+  const [page, setPage] = usePersistentState<PageId>('sb.page', 'home');
   const mainRef = useRef<HTMLElement>(null);
 
   useGlobalHotkeys();

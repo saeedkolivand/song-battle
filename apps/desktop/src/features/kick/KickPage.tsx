@@ -6,6 +6,7 @@ import type { KickOfficialStatus, KickView } from '@sb/types';
 import { useBattleStore } from '../../stores/battle';
 import { ipc } from '../../lib/ipc';
 import { useAction } from '../../lib/useAction';
+import { usePersistentState } from '../../lib/usePersistentState';
 import {
   PageHeader,
   Section,
@@ -24,13 +25,15 @@ const DISCONNECTED_KICK: KickView = { state: 'disconnected', channel: null };
 
 export function KickPage() {
   const kick = useBattleStore((s) => s.snapshot?.kick ?? DISCONNECTED_KICK);
-  const [mode, setMode] = useState<Mode>('unofficial');
+  const [mode, setMode] = usePersistentState<Mode>('sb.kick.mode', 'unofficial');
   const unofficial = useAction();
-  const [channel, setChannel] = useState('');
-  const [chatroomId, setChatroomId] = useState('');
+  const [channel, setChannel] = usePersistentState('sb.kick.channel', '');
+  const [chatroomId, setChatroomId] = usePersistentState('sb.kick.chatroomId', '');
 
   const official = useAction();
-  const [clientId, setClientId] = useState('');
+  const [clientId, setClientId] = usePersistentState('sb.kick.clientId', '');
+  // Secret is NOT persisted in the renderer — it's sent to the DB on login and
+  // cleared here after (see `login`). Never put a secret in localStorage.
   const [clientSecret, setClientSecret] = useState('');
   const [status, setStatus] = useState<KickOfficialStatus | null>(null);
   const [statusError, setStatusError] = useState<string | null>(null);
