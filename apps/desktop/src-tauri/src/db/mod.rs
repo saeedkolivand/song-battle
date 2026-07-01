@@ -9,7 +9,7 @@ use crate::domain::{
     snapshot::{SavedBattle, Settings},
     song::{Song, Source},
     timer::Timer,
-    vote::{Votes, VoteChoice},
+    vote::{VoteChoice, Votes},
 };
 use crate::error::AppResult;
 use rusqlite::{params, Connection, OptionalExtension};
@@ -56,6 +56,20 @@ ALTER TABLE matches ADD COLUMN wins_b INTEGER NOT NULL DEFAULT 0;
 // Chat song submissions toggle (default on).
 const M5_CHAT_SUBMISSIONS: &str =
     "ALTER TABLE settings ADD COLUMN chat_submissions INTEGER NOT NULL DEFAULT 1;";
+// K1: official Kick API OAuth 2.1 + PKCE creds/tokens. Single row like `settings`.
+// Everything but `id` is nullable — unset until the user logs in.
+const M6_KICK_AUTH: &str = "
+CREATE TABLE kick_auth (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  client_id TEXT,
+  client_secret TEXT,
+  access_token TEXT,
+  refresh_token TEXT,
+  expires_at INTEGER,
+  subscription_id TEXT
+);
+INSERT INTO kick_auth (id) VALUES (1);
+";
 
 fn migrations() -> Migrations<'static> {
     Migrations::new(vec![
@@ -64,6 +78,7 @@ fn migrations() -> Migrations<'static> {
         M::up(M3_SETTINGS),
         M::up(M4_MODES),
         M::up(M5_CHAT_SUBMISSIONS),
+        M::up(M6_KICK_AUTH),
     ])
 }
 
@@ -110,8 +125,16 @@ pub fn save_battle(conn: &Connection, b: &Battle) -> AppResult<()> {
              (id,battle_id,ordering,title,artist,thumbnail,duration_sec,source,source_url,submitter)
              VALUES (?,?,?,?,?,?,?,?,?,?)",
             params![
-                s.id, b.id, i as i64, s.title, s.artist, s.thumbnail,
-                s.duration_sec, source_str(s.source), s.source_url, s.submitter
+                s.id,
+                b.id,
+                i as i64,
+                s.title,
+                s.artist,
+                s.thumbnail,
+                s.duration_sec,
+                source_str(s.source),
+                s.source_url,
+                s.submitter
             ],
         )?;
     }
@@ -204,6 +227,92 @@ pub fn set_chat_submissions(conn: &Connection, enabled: bool) -> AppResult<()> {
     Ok(())
 }
 
+// ── official Kick OAuth (K1) ────────────────────────────────────────────────
+// ponytail: plaintext client_secret/tokens in SQLite, same as the OBS password
+// — local desktop app, not a hosted service. Flagged for the security review.
+#[derive(Debug, Clone, Default)]
+pub struct KickAuth {
+    pub client_id: Option<String>,
+    pub client_secret: Option<String>,
+    pub access_token: Option<String>,
+    // K2 reads these (token-refresh check); K1 only round-trips them through
+    // the DB (write in set_kick_tokens, exercised by db::tests::kick_auth_round_trips).
+    #[allow(dead_code)]
+    pub refresh_token: Option<String>,
+    #[allow(dead_code)]
+    pub expires_at: Option<i64>,
+    pub subscription_id: Option<String>,
+}
+
+pub fn get_kick_auth(conn: &Connection) -> AppResult<KickAuth> {
+    Ok(conn.query_row(
+        "SELECT client_id, client_secret, access_token, refresh_token, expires_at, subscription_id
+         FROM kick_auth WHERE id=1",
+        [],
+        |r| {
+            Ok(KickAuth {
+                client_id: r.get(0)?,
+                client_secret: r.get(1)?,
+                access_token: r.get(2)?,
+                refresh_token: r.get(3)?,
+                expires_at: r.get(4)?,
+                subscription_id: r.get(5)?,
+            })
+        },
+    )?)
+}
+
+pub fn set_kick_creds(conn: &Connection, client_id: &str, client_secret: &str) -> AppResult<()> {
+    conn.execute(
+        "UPDATE kick_auth SET client_id=?, client_secret=? WHERE id=1",
+        params![client_id, client_secret],
+    )?;
+    Ok(())
+}
+
+/// `refresh_token` is only overwritten when `Some` — Kick doesn't always
+/// rotate it on `grant_type=refresh_token`, so `None` keeps the existing one.
+pub fn set_kick_tokens(
+    conn: &Connection,
+    access_token: &str,
+    refresh_token: Option<&str>,
+    expires_at: i64,
+) -> AppResult<()> {
+    match refresh_token {
+        Some(rt) => conn.execute(
+            "UPDATE kick_auth SET access_token=?, refresh_token=?, expires_at=? WHERE id=1",
+            params![access_token, rt, expires_at],
+        ),
+        None => conn.execute(
+            "UPDATE kick_auth SET access_token=?, expires_at=? WHERE id=1",
+            params![access_token, expires_at],
+        ),
+    }?;
+    Ok(())
+}
+
+// K2: called after creating the webhook subscription. Not yet wired to a
+// command in K1 — covered directly by db::tests::kick_auth_round_trips.
+#[allow(dead_code)]
+pub fn set_kick_subscription(conn: &Connection, subscription_id: Option<&str>) -> AppResult<()> {
+    conn.execute(
+        "UPDATE kick_auth SET subscription_id=? WHERE id=1",
+        params![subscription_id],
+    )?;
+    Ok(())
+}
+
+/// Local logout: clears creds, tokens, and subscription id. (K2 also deletes
+/// the remote webhook subscription before calling this.)
+pub fn clear_kick_auth(conn: &Connection) -> AppResult<()> {
+    conn.execute(
+        "UPDATE kick_auth SET client_id=NULL, client_secret=NULL, access_token=NULL,
+         refresh_token=NULL, expires_at=NULL, subscription_id=NULL WHERE id=1",
+        [],
+    )?;
+    Ok(())
+}
+
 /// Load the most-recently-updated battle (the one to resume on launch).
 pub fn load_latest(conn: &Connection) -> AppResult<Option<Battle>> {
     let id: Option<String> = conn
@@ -242,8 +351,18 @@ pub fn load_battle(conn: &Connection, id: &str) -> AppResult<Option<Battle>> {
             },
         )
         .optional()?;
-    let Some((id, title, description, theme, mode, status, total_rounds, duration_sec, winner_id, current_idx)) =
-        row
+    let Some((
+        id,
+        title,
+        description,
+        theme,
+        mode,
+        status,
+        total_rounds,
+        duration_sec,
+        winner_id,
+        current_idx,
+    )) = row
     else {
         return Ok(None);
     };
@@ -536,6 +655,47 @@ mod tests {
     }
 
     #[test]
+    fn kick_auth_round_trips() {
+        let conn = open_in_memory().unwrap();
+        // migration seeds an all-NULL row
+        let auth = get_kick_auth(&conn).unwrap();
+        assert!(auth.client_id.is_none());
+        assert!(auth.access_token.is_none());
+
+        set_kick_creds(&conn, "cid", "secret").unwrap();
+        set_kick_tokens(&conn, "AT1", Some("RT1"), 1_700_000_000).unwrap();
+        let auth = get_kick_auth(&conn).unwrap();
+        assert_eq!(auth.client_id.as_deref(), Some("cid"));
+        assert_eq!(auth.client_secret.as_deref(), Some("secret"));
+        assert_eq!(auth.access_token.as_deref(), Some("AT1"));
+        assert_eq!(auth.refresh_token.as_deref(), Some("RT1"));
+        assert_eq!(auth.expires_at, Some(1_700_000_000));
+
+        // a refresh that didn't rotate the refresh token must keep the old one
+        set_kick_tokens(&conn, "AT2", None, 1_700_000_999).unwrap();
+        let auth = get_kick_auth(&conn).unwrap();
+        assert_eq!(auth.access_token.as_deref(), Some("AT2"));
+        assert_eq!(
+            auth.refresh_token.as_deref(),
+            Some("RT1"),
+            "unrotated refresh token is kept"
+        );
+
+        set_kick_subscription(&conn, Some("sub-1")).unwrap();
+        assert_eq!(
+            get_kick_auth(&conn).unwrap().subscription_id.as_deref(),
+            Some("sub-1")
+        );
+
+        clear_kick_auth(&conn).unwrap();
+        let auth = get_kick_auth(&conn).unwrap();
+        assert!(auth.client_id.is_none());
+        assert!(auth.access_token.is_none());
+        assert!(auth.refresh_token.is_none());
+        assert!(auth.subscription_id.is_none());
+    }
+
+    #[test]
     fn settings_persist() {
         let conn = open_in_memory().unwrap();
         // migration seeds defaults
@@ -623,7 +783,9 @@ mod tests {
 
         // Persist and reload.
         save_battle(&conn, &b).unwrap();
-        let loaded = load_latest(&conn).unwrap().expect("battle present after save");
+        let loaded = load_latest(&conn)
+            .unwrap()
+            .expect("battle present after save");
 
         // ── assertions that catch the load-ordering bug ──────────────────────
         assert_eq!(
@@ -661,11 +823,8 @@ mod tests {
         let loaded = load_latest(&conn).unwrap().unwrap();
         assert_eq!(loaded.mode, BattleMode::Double);
         assert_eq!(loaded.matches.len(), b.matches.len()); // 7
-        // mode/group/best_of persisted
-        assert!(loaded
-            .matches
-            .iter()
-            .any(|m| m.group == MatchGroup::Grand));
+                                                           // mode/group/best_of persisted
+        assert!(loaded.matches.iter().any(|m| m.group == MatchGroup::Grand));
         // routing was recomputed on load (not persisted): WB final → grand slot a.
         let wf = loaded
             .matches

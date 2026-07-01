@@ -12,13 +12,13 @@ use crate::domain::{
     vote::VoteChoice,
 };
 use crate::error::{AppError, AppResult};
-use uuid::Uuid;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
 use tauri::Emitter;
 use tokio::sync::broadcast;
 use tokio::task::JoinHandle;
+use uuid::Uuid;
 
 /// Live in-memory state behind the lock.
 #[derive(Default)]
@@ -44,6 +44,13 @@ impl Default for KickConn {
     }
 }
 
+/// The (verifier, state) pair for an in-flight official-Kick OAuth login.
+/// RAM-only — a stale login after an app restart just needs a retry.
+struct PendingOauth {
+    verifier: String,
+    state: String,
+}
+
 #[derive(Clone)]
 pub struct AppState {
     inner: Arc<RwLock<App>>,
@@ -53,6 +60,7 @@ pub struct AppState {
     dirty: Arc<AtomicBool>,
     app_handle: Arc<Mutex<Option<tauri::AppHandle>>>,
     kick_tasks: Arc<Mutex<Vec<JoinHandle<()>>>>,
+    pending_oauth: Arc<Mutex<Option<PendingOauth>>>,
 }
 
 impl AppState {
@@ -70,11 +78,22 @@ impl AppState {
             dirty: Arc::new(AtomicBool::new(false)),
             app_handle: Arc::new(Mutex::new(None)),
             kick_tasks: Arc::new(Mutex::new(Vec::new())),
+            pending_oauth: Arc::new(Mutex::new(None)),
         }
     }
 
     pub fn set_app_handle(&self, handle: tauri::AppHandle) {
         *self.app_handle.lock().unwrap() = Some(handle);
+    }
+
+    /// Emit a Tauri event to the frontend, if the app handle is set yet (the
+    /// overlay server can start before `.setup()` finishes wiring it up).
+    /// Mirrors `broadcast()`'s best-effort emit — never fails the caller.
+    pub fn emit_event(&self, event: &str) {
+        let handle = self.app_handle.lock().unwrap().clone();
+        if let Some(h) = handle {
+            let _ = h.emit(event, ());
+        }
     }
 
     pub fn set_battle(&self, battle: Battle) {
@@ -111,6 +130,58 @@ impl AppState {
 
     pub fn set_kick_state(&self, state: ConnectionState) {
         self.inner.write().unwrap().kick.state = state;
+    }
+
+    // ── official Kick OAuth (K1) ────────────────────────────────────────────
+    /// Stash the PKCE verifier + CSRF state for the in-flight login.
+    pub fn start_oauth(&self, verifier: String, state: String) {
+        *self.pending_oauth.lock().unwrap() = Some(PendingOauth { verifier, state });
+    }
+
+    /// Validate the callback's `state` against the pending login. Consumes the
+    /// pending entry only on a match (single-use — closes the replay window); a
+    /// wrong `state` leaves the real login in place so it can still complete.
+    /// `None` means no login is in flight, or the state didn't match (CSRF check).
+    pub fn take_oauth(&self, state: &str) -> Option<String> {
+        let mut guard = self.pending_oauth.lock().unwrap();
+        if guard.as_ref().is_some_and(|p| p.state == state) {
+            return guard.take().map(|p| p.verifier);
+        }
+        None
+    }
+
+    pub async fn get_kick_auth(&self) -> AppResult<db::KickAuth> {
+        self.read_db(db::get_kick_auth).await
+    }
+
+    pub async fn set_kick_creds(&self, client_id: String, client_secret: String) -> AppResult<()> {
+        self.write_db(move |conn| db::set_kick_creds(conn, &client_id, &client_secret))
+            .await
+    }
+
+    pub async fn set_kick_tokens(
+        &self,
+        access_token: String,
+        refresh_token: Option<String>,
+        expires_at: i64,
+    ) -> AppResult<()> {
+        self.write_db(move |conn| {
+            db::set_kick_tokens(conn, &access_token, refresh_token.as_deref(), expires_at)
+        })
+        .await
+    }
+
+    // K2: wired once the webhook-subscribe call lands.
+    #[allow(dead_code)]
+    pub async fn set_kick_subscription(&self, subscription_id: Option<String>) -> AppResult<()> {
+        self.write_db(move |conn| db::set_kick_subscription(conn, subscription_id.as_deref()))
+            .await
+    }
+
+    /// Local logout — K2 also deletes the remote webhook subscription before
+    /// calling this.
+    pub async fn clear_kick_auth(&self) -> AppResult<()> {
+        self.write_db(db::clear_kick_auth).await
     }
 
     pub fn export_json(&self) -> AppResult<String> {
@@ -406,5 +477,37 @@ mod tests {
     #[test]
     fn broadcaster_spawns_without_ambient_runtime() {
         spawn_broadcaster(AppState::test());
+    }
+
+    #[test]
+    fn oauth_state_round_trips_and_is_single_use() {
+        let state = AppState::test();
+        state.start_oauth("verifier123".into(), "state-abc".into());
+        assert_eq!(
+            state.take_oauth("state-abc").as_deref(),
+            Some("verifier123")
+        );
+        // consumed: a second take, even with the right state, is None
+        assert!(state.take_oauth("state-abc").is_none());
+    }
+
+    #[test]
+    fn oauth_state_mismatch_is_rejected_but_preserves_pending_login() {
+        let state = AppState::test();
+        state.start_oauth("verifier123".into(), "state-abc".into());
+        // CSRF check: a wrong `state` param never returns the verifier...
+        assert!(state.take_oauth("attacker-guess").is_none());
+        // ...and it does NOT burn the real pending login, so the legitimate
+        // callback still completes (a bad guess can't DoS an in-flight login).
+        assert_eq!(
+            state.take_oauth("state-abc").as_deref(),
+            Some("verifier123")
+        );
+    }
+
+    #[test]
+    fn oauth_take_without_a_pending_login_is_none() {
+        let state = AppState::test();
+        assert!(state.take_oauth("anything").is_none());
     }
 }

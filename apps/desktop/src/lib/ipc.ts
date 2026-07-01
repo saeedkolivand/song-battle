@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import type { Snapshot, SavedBattle, Settings, BattleMode } from '@sb/types';
+import type { Snapshot, SavedBattle, Settings, BattleMode, KickOfficialStatus } from '@sb/types';
 
 // Canonical type lives in @sb/types; alias kept for existing call sites.
 export type AppSettings = Settings;
@@ -33,6 +33,12 @@ export const ipc = {
   connectKick: (channel: string, chatroomId?: number) =>
     invoke<void>('connect_kick', { channel, chatroomId: chatroomId ?? null }),
   disconnectKick: () => invoke<void>('disconnect_kick'),
+
+  // Official Kick API (OAuth) — alongside the unofficial (Pusher) path above.
+  kickOauthStart: (clientId: string, clientSecret: string) =>
+    invoke<string>('kick_oauth_start', { clientId, clientSecret }),
+  kickOfficialStatus: () => invoke<KickOfficialStatus>('kick_official_status'),
+  kickOfficialDisconnect: () => invoke<void>('kick_official_disconnect'),
 
   exportJson: () => invoke<string>('export_json'),
   importJson: (json: string) => invoke<void>('import_json', { json }),

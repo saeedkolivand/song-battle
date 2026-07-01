@@ -3,17 +3,19 @@
 //! clients get a full snapshot immediately on connect.
 
 use crate::error::AppResult;
+use crate::providers::kick_official;
 use crate::state::AppState;
 use axum::{
     extract::{
         ws::{Message, WebSocket, WebSocketUpgrade},
-        State,
+        Query, State,
     },
-    response::{IntoResponse, Response},
+    response::{Html, IntoResponse, Response},
     routing::get,
     Router,
 };
 use rust_embed::RustEmbed;
+use serde::Deserialize;
 use std::net::SocketAddr;
 use tokio::net::TcpListener;
 use tokio::sync::broadcast::error::RecvError;
@@ -38,6 +40,7 @@ pub async fn run_server(port: u16, state: AppState) -> AppResult<()> {
 pub async fn serve_on(listener: TcpListener, state: AppState) -> AppResult<()> {
     let app = Router::new()
         .route("/ws", get(ws_handler))
+        .route("/oauth/callback", get(oauth_callback))
         .fallback(static_handler)
         .with_state(state);
     tracing::info!("overlay server on http://{}/", listener.local_addr()?);
@@ -76,6 +79,98 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
             Err(RecvError::Closed) => break,
         }
     }
+}
+
+#[derive(Debug, Deserialize)]
+struct OauthCallbackParams {
+    code: Option<String>,
+    state: Option<String>,
+    /// Kick sends this instead of `code` when the user denies consent.
+    error: Option<String>,
+}
+
+/// The official Kick OAuth 2.1 + PKCE loopback redirect target (K1). Exchanges
+/// the code for tokens, persists them, and notifies the UI via a `kick-auth`
+/// Tauri event. Never panics — always renders small HTML so the popup tab
+/// shows something sane even on failure.
+async fn oauth_callback(
+    Query(params): Query<OauthCallbackParams>,
+    State(state): State<AppState>,
+) -> Response {
+    if let Some(err) = params.error {
+        tracing::warn!("kick oauth: provider returned error={err}");
+        return oauth_html("Kick login failed (denied or errored) — you can close this tab.")
+            .into_response();
+    }
+    let (Some(code), Some(csrf_state)) = (params.code, params.state) else {
+        return oauth_html("Kick login failed: missing code/state — you can close this tab.")
+            .into_response();
+    };
+    let Some(verifier) = state.take_oauth(&csrf_state) else {
+        tracing::warn!("kick oauth: callback with an unknown or expired state");
+        return (
+            axum::http::StatusCode::BAD_REQUEST,
+            oauth_html("Kick login failed: expired session — please try logging in again."),
+        )
+            .into_response();
+    };
+
+    let creds = match state.get_kick_auth().await {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::error!("kick oauth: failed to read stored credentials: {e}");
+            return oauth_html("Kick login failed: internal error — you can close this tab.")
+                .into_response();
+        }
+    };
+    let (Some(client_id), Some(client_secret)) = (creds.client_id, creds.client_secret) else {
+        tracing::error!("kick oauth: no client credentials stored before callback");
+        return oauth_html(
+            "Kick login failed: no credentials configured — you can close this tab.",
+        )
+        .into_response();
+    };
+
+    let redirect_uri = kick_official::redirect_uri();
+    let tokens = match kick_official::exchange_code(
+        &client_id,
+        &client_secret,
+        &code,
+        &redirect_uri,
+        &verifier,
+    )
+    .await
+    {
+        Ok(t) => t,
+        Err(e) => {
+            tracing::error!("kick oauth: token exchange failed: {e}");
+            return oauth_html("Kick login failed: token exchange error — you can close this tab.")
+                .into_response();
+        }
+    };
+
+    let expires_at = kick_official::expiry_from(tokens.expires_in);
+    if let Err(e) = state
+        .set_kick_tokens(tokens.access_token, tokens.refresh_token, expires_at)
+        .await
+    {
+        tracing::error!("kick oauth: failed to persist tokens: {e}");
+        return oauth_html("Kick login failed: could not save tokens — you can close this tab.")
+            .into_response();
+    }
+
+    // K2: create the events:subscribe webhook subscription here and persist
+    // its id via state.set_kick_subscription(...).
+
+    state.emit_event("kick-auth");
+    tracing::info!("kick oauth: connected");
+    oauth_html("Kick connected — you can close this tab.").into_response()
+}
+
+fn oauth_html(msg: &str) -> Html<String> {
+    Html(format!(
+        "<html><body style=\"font-family:sans-serif;text-align:center;margin-top:3rem\"><p>{msg}</p></body></html>"
+    ))
 }
 
 async fn static_handler(uri: axum::http::Uri) -> Response {
@@ -217,5 +312,149 @@ mod tests {
                 _ => continue,
             }
         }
+    }
+
+    // ── /oauth/callback (K1) ─────────────────────────────────────────────────
+    // No real token exchange is exercised here (that needs Kick's live token
+    // endpoint) — these cover the request-validation branches that run before
+    // any network call, which is where a malformed/replayed/expired callback
+    // must fail safely instead of panicking.
+
+    #[tokio::test]
+    async fn oauth_callback_rejects_unknown_or_expired_state_with_400() {
+        let state = AppState::test();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let _ = serve_on(listener, state).await;
+        });
+
+        // No matching start_oauth() was ever called — any state is "unknown".
+        let resp = crate::net::shared()
+            .get(format!(
+                "http://{addr}/oauth/callback?code=abc123&state=not-pending"
+            ))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), reqwest::StatusCode::BAD_REQUEST);
+        let body = resp.text().await.unwrap();
+        assert!(body.contains("expired session"), "{body}");
+    }
+
+    #[tokio::test]
+    async fn oauth_callback_handles_missing_params_without_panicking() {
+        let state = AppState::test();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let _ = serve_on(listener, state).await;
+        });
+
+        let resp = crate::net::shared()
+            .get(format!("http://{addr}/oauth/callback"))
+            .send()
+            .await
+            .unwrap();
+        assert!(resp.status().is_success());
+        let body = resp.text().await.unwrap();
+        assert!(body.contains("missing code/state"), "{body}");
+    }
+
+    #[tokio::test]
+    async fn oauth_callback_surfaces_provider_denial() {
+        let state = AppState::test();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let _ = serve_on(listener, state).await;
+        });
+
+        let resp = crate::net::shared()
+            .get(format!("http://{addr}/oauth/callback?error=access_denied"))
+            .send()
+            .await
+            .unwrap();
+        assert!(resp.status().is_success());
+        let body = resp.text().await.unwrap();
+        assert!(body.contains("denied or errored"), "{body}");
+    }
+
+    #[tokio::test]
+    async fn oauth_callback_rejects_valid_state_with_no_stored_credentials() {
+        // A matching state passes the CSRF gate, but nothing ever stored a
+        // client_id/secret → the exchange must be refused, not attempted.
+        let state = AppState::test();
+        state.start_oauth("verifier".into(), "state-ok".into());
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let srv = state.clone();
+        tokio::spawn(async move {
+            let _ = serve_on(listener, srv).await;
+        });
+
+        let resp = crate::net::shared()
+            .get(format!(
+                "http://{addr}/oauth/callback?code=abc&state=state-ok"
+            ))
+            .send()
+            .await
+            .unwrap();
+        assert!(resp.status().is_success());
+        let body = resp.text().await.unwrap();
+        assert!(body.contains("no credentials configured"), "{body}");
+    }
+
+    #[tokio::test]
+    async fn oauth_callback_exchanges_code_and_persists_tokens() {
+        use axum::{routing::post, Json};
+
+        // Mock Kick token endpoint — returns a canned token response.
+        let token_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let token_addr = token_listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let app = Router::new().route(
+                "/oauth/token",
+                post(|| async {
+                    Json(serde_json::json!({
+                        "access_token": "AT-live",
+                        "refresh_token": "RT-live",
+                        "expires_in": 3600
+                    }))
+                }),
+            );
+            let _ = axum::serve(token_listener, app).await;
+        });
+        kick_official::set_token_url_for_test(format!("http://{token_addr}/oauth/token"));
+
+        // App has creds stored and a pending login matching the callback state.
+        let state = AppState::test();
+        state
+            .set_kick_creds("cid".into(), "csecret".into())
+            .await
+            .unwrap();
+        state.start_oauth("verifier-xyz".into(), "state-xyz".into());
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let srv = state.clone();
+        tokio::spawn(async move {
+            let _ = serve_on(listener, srv).await;
+        });
+
+        let resp = crate::net::shared()
+            .get(format!(
+                "http://{addr}/oauth/callback?code=the-code&state=state-xyz"
+            ))
+            .send()
+            .await
+            .unwrap();
+        assert!(resp.status().is_success());
+        assert!(resp.text().await.unwrap().contains("Kick connected"));
+
+        // The exchanged tokens landed in the DB.
+        let auth = state.get_kick_auth().await.unwrap();
+        assert_eq!(auth.access_token.as_deref(), Some("AT-live"));
+        assert_eq!(auth.refresh_token.as_deref(), Some("RT-live"));
     }
 }
