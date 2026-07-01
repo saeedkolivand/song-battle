@@ -222,7 +222,28 @@ async fn kick_webhook(State(state): State<AppState>, headers: HeaderMap, body: B
         return StatusCode::UNAUTHORIZED.into_response();
     }
 
-    // Verified. Drop Kick's redeliveries so a retried POST can't double-count.
+    // Authentic — now bound the replay window in time too (the id cache alone is
+    // only size-bounded). `ts` is trustworthy only after the signature check.
+    if !kick_official::timestamp_is_fresh(&ts) {
+        tracing::warn!("kick webhook: ignoring stale/skewed delivery (id={id})");
+        return StatusCode::OK.into_response();
+    }
+
+    // Only act while we still hold a subscription. `subscription_id` is cleared
+    // on disconnect even if the remote unsubscribe failed, so this stops events
+    // from mutating the battle after the user disconnects. (Read runs only for
+    // signature-verified requests, so a forged flood can't hammer the DB.)
+    if state
+        .get_kick_auth()
+        .await
+        .ok()
+        .and_then(|a| a.subscription_id)
+        .is_none()
+    {
+        return StatusCode::OK.into_response();
+    }
+
+    // Drop Kick's redeliveries so a retried POST can't double-count.
     if !state.webhook_id_is_new(&id) {
         return StatusCode::OK.into_response();
     }
@@ -539,16 +560,18 @@ mod tests {
     }
 
     // ── /kick/webhook (K2) ───────────────────────────────────────────────────
-    // The endpoint is public through the tunnel, so the signature gate is the
-    // security boundary: a forged POST must be rejected, a correctly-signed one
-    // accepted, and a redelivery deduped.
+    // The endpoint is public through the tunnel, so it's gated in layers:
+    // signature (forgery→401) → freshness (stale→ignore) → active subscription
+    // (disconnected→ignore) → replay dedupe. `webhook_id_seen` observes whether a
+    // request made it past the gates into processing.
     #[tokio::test]
-    async fn webhook_rejects_forged_signature_and_accepts_a_valid_one() {
+    async fn webhook_signature_freshness_and_subscription_gate() {
         use base64::{engine::general_purpose::STANDARD, Engine as _};
         use rsa::pkcs1v15::SigningKey;
         use rsa::pkcs8::{EncodePublicKey, LineEnding};
         use rsa::signature::{SignatureEncoding, Signer};
         use sha2::Sha256;
+        use time::{format_description::well_known::Rfc3339, Duration, OffsetDateTime};
 
         // Stand-in for Kick's signing key; seed the handler's key cache with it.
         let mut rng = rand::thread_rng();
@@ -566,37 +589,73 @@ mod tests {
             let _ = serve_on(listener, srv).await;
         });
 
-        let body = br#"{"message_id":"m1","content":"1","sender":{"user_id":7,"username":"bob","identity":null}}"#;
-        let (id, ts) = ("01HWEBHOOK", "2026-07-01T00:00:00Z");
-        let mut signed = Vec::new();
-        signed.extend_from_slice(id.as_bytes());
-        signed.push(b'.');
-        signed.extend_from_slice(ts.as_bytes());
-        signed.push(b'.');
-        signed.extend_from_slice(body);
-        let good_sig =
-            STANDARD.encode(SigningKey::<Sha256>::new(priv_key).sign(&signed).to_bytes());
-
-        let post = |sig: String| {
+        let body = br#"{"message_id":"m","content":"1","sender":{"user_id":7,"username":"bob","identity":null}}"#;
+        let now_ts = OffsetDateTime::now_utc().format(&Rfc3339).unwrap();
+        let sign = |id: &str, ts: &str| {
+            let mut m = Vec::new();
+            m.extend_from_slice(id.as_bytes());
+            m.push(b'.');
+            m.extend_from_slice(ts.as_bytes());
+            m.push(b'.');
+            m.extend_from_slice(body);
+            STANDARD.encode(
+                SigningKey::<Sha256>::new(priv_key.clone())
+                    .sign(&m)
+                    .to_bytes(),
+            )
+        };
+        let post = |id: &str, ts: String, sig: String| {
             crate::net::shared()
                 .post(format!("http://{addr}/kick/webhook"))
-                .header("Kick-Event-Message-Id", id)
+                .header("Kick-Event-Message-Id", id.to_owned())
                 .header("Kick-Event-Message-Timestamp", ts)
                 .header("Kick-Event-Signature", sig)
                 .body(body.to_vec())
                 .send()
         };
 
-        // Forged signature → 401.
-        let forged = post("Zm9yZ2Vk".into()).await.unwrap();
+        // Forged signature → 401, nothing recorded.
+        let forged = post("id-forged", now_ts.clone(), "Zm9yZ2Vk".into())
+            .await
+            .unwrap();
         assert_eq!(forged.status(), reqwest::StatusCode::UNAUTHORIZED);
 
-        // Correctly signed → 200.
-        let ok = post(good_sig.clone()).await.unwrap();
-        assert_eq!(ok.status(), reqwest::StatusCode::OK);
+        // Validly signed but NOT subscribed yet → 200, ignored before dedupe.
+        let unsub = post("id-unsub", now_ts.clone(), sign("id-unsub", &now_ts))
+            .await
+            .unwrap();
+        assert_eq!(unsub.status(), reqwest::StatusCode::OK);
+        assert!(
+            !state.webhook_id_seen("id-unsub"),
+            "gated out when not subscribed"
+        );
 
-        // Redelivery of the same message id → still 200 (deduped, not reprocessed).
-        let replay = post(good_sig).await.unwrap();
+        state
+            .set_kick_subscription(Some("sub-1".into()))
+            .await
+            .unwrap();
+
+        // Stale timestamp (still validly signed) → 200, ignored.
+        let stale_ts = (OffsetDateTime::now_utc() - Duration::minutes(10))
+            .format(&Rfc3339)
+            .unwrap();
+        let stale = post("id-stale", stale_ts.clone(), sign("id-stale", &stale_ts))
+            .await
+            .unwrap();
+        assert_eq!(stale.status(), reqwest::StatusCode::OK);
+        assert!(!state.webhook_id_seen("id-stale"), "stale delivery ignored");
+
+        // Fresh + signed + subscribed → 200 and processed (recorded).
+        let ok = post("id-ok", now_ts.clone(), sign("id-ok", &now_ts))
+            .await
+            .unwrap();
+        assert_eq!(ok.status(), reqwest::StatusCode::OK);
+        assert!(state.webhook_id_seen("id-ok"), "processed past the gate");
+
+        // Redelivery of the same id → still 200 (deduped, not reprocessed).
+        let replay = post("id-ok", now_ts.clone(), sign("id-ok", &now_ts))
+            .await
+            .unwrap();
         assert_eq!(replay.status(), reqwest::StatusCode::OK);
     }
 

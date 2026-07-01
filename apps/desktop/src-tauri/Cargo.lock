@@ -815,6 +815,7 @@ dependencies = [
  "tauri-build",
  "tauri-plugin-opener",
  "thiserror 2.0.18",
+ "time",
  "tokio",
  "tokio-tungstenite 0.24.0",
  "tracing",

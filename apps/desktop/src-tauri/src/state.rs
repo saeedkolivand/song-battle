@@ -106,6 +106,13 @@ impl AppState {
         true
     }
 
+    /// Test-only peek: has this webhook id been recorded (i.e. processed past the
+    /// subscription gate)? Used to assert the gate without a full battle.
+    #[cfg(test)]
+    pub(crate) fn webhook_id_seen(&self, id: &str) -> bool {
+        self.webhook_ids.lock().unwrap().iter().any(|x| x == id)
+    }
+
     pub fn set_app_handle(&self, handle: tauri::AppHandle) {
         *self.app_handle.lock().unwrap() = Some(handle);
     }
@@ -195,8 +202,7 @@ impl AppState {
         .await
     }
 
-    // K2: wired once the webhook-subscribe call lands.
-    #[allow(dead_code)]
+    /// Persist the active webhook subscription id (cleared on disconnect).
     pub async fn set_kick_subscription(&self, subscription_id: Option<String>) -> AppResult<()> {
         self.write_db(move |conn| db::set_kick_subscription(conn, subscription_id.as_deref()))
             .await

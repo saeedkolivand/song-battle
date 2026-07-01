@@ -37,7 +37,7 @@ pub async fn connect_kick(
     });
 
     let app = state.inner().clone();
-    let fetch_sem = Arc::new(Semaphore::new(SUBMIT_FETCH_CONCURRENCY));
+    let fetch_sem = submit_fetch_sem(); // shared with the webhook path — one global cap
     let consume = tokio::spawn(async move {
         while let Some(ev) = rx.recv().await {
             match ev {

@@ -228,6 +228,24 @@ pub fn verify_webhook(
         .is_ok()
 }
 
+/// Max age of a webhook's signed timestamp before we ignore it. The signature
+/// proves authenticity but not freshness; this bounds the replay window in TIME
+/// (the id dedupe only bounds it by cache size). Both directions, to tolerate
+/// small clock skew.
+const WEBHOOK_MAX_AGE_SECS: i64 = 300;
+
+/// True if `timestamp` (the signed RFC3339 `Kick-Event-Message-Timestamp`) is
+/// within ±5 min of now. Malformed → `false`. Only meaningful AFTER the
+/// signature verifies (the timestamp is attacker-controlled until then).
+pub fn timestamp_is_fresh(timestamp: &str) -> bool {
+    use time::{format_description::well_known::Rfc3339, OffsetDateTime};
+    let Ok(ts) = OffsetDateTime::parse(timestamp, &Rfc3339) else {
+        return false;
+    };
+    let now = (crate::providers::now_ms() / 1000) as i64;
+    (now - ts.unix_timestamp()).abs() <= WEBHOOK_MAX_AGE_SECS
+}
+
 /// Parse a `chat.message.sent` webhook body into our `ChatMessage`. `None` if it
 /// isn't a chat message (missing sender/content) — the handler then ignores it.
 pub fn parse_chat_event(v: &serde_json::Value) -> Option<crate::providers::ChatMessage> {
@@ -267,7 +285,7 @@ pub fn parse_chat_event(v: &serde_json::Value) -> Option<crate::providers::ChatM
             username: username.clone(),
             display_name: username,
             is_mod: has("moderator") || has("broadcaster"),
-            is_sub: has("subscriber"),
+            is_sub: has("subscriber") || has("founder"), // parity with the Pusher parser
             is_vip: has("vip"),
         },
         text,
@@ -275,16 +293,35 @@ pub fn parse_chat_event(v: &serde_json::Value) -> Option<crate::providers::ChatM
     })
 }
 
-/// Subscribe the authorized broadcaster to `chat.message.sent` webhooks. The
-/// callback URL is the app-global one set at dev.kick.com (not per-subscription),
-/// so it isn't sent here. Returns the new subscription id.
+/// The events-subscriptions endpoint, overridable in tests to point at a local
+/// mock server instead of api.kick.com.
+fn subscriptions_url() -> String {
+    #[cfg(test)]
+    if let Some(u) = SUBSCRIPTIONS_URL_OVERRIDE.get() {
+        return u.clone();
+    }
+    SUBSCRIPTIONS_URL.to_string()
+}
+
+#[cfg(test)]
+static SUBSCRIPTIONS_URL_OVERRIDE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
+#[cfg(test)]
+pub(crate) fn set_subscriptions_url_for_test(url: String) {
+    let _ = SUBSCRIPTIONS_URL_OVERRIDE.set(url);
+}
+
+/// Subscribe the authorized broadcaster to `chat.message.sent` webhooks. With a
+/// USER access token Kick infers the broadcaster (so no `broadcaster_user_id`),
+/// and the callback URL is the app-global one set at dev.kick.com. Returns the
+/// new subscription id (Kick's `data[0].subscription_id`).
 pub async fn subscribe_chat(access_token: &str) -> AppResult<String> {
     let body = serde_json::json!({
         "events": [{ "name": "chat.message.sent", "version": 1 }],
         "method": "webhook",
     });
     let v: serde_json::Value = net::shared()
-        .post(SUBSCRIPTIONS_URL)
+        .post(subscriptions_url())
         .bearer_auth(access_token)
         .json(&body)
         .send()
@@ -303,7 +340,7 @@ pub async fn subscribe_chat(access_token: &str) -> AppResult<String> {
 /// Best-effort remote unsubscribe (local logout clears tokens regardless).
 pub async fn unsubscribe(access_token: &str, subscription_id: &str) -> AppResult<()> {
     net::shared()
-        .delete(SUBSCRIPTIONS_URL)
+        .delete(subscriptions_url())
         .query(&[("id", subscription_id)])
         .bearer_auth(access_token)
         .send()
@@ -501,5 +538,46 @@ mod tests {
         assert!(!m.user.is_mod && !m.user.is_sub && !m.user.is_vip);
         // Missing content/sender → not a chat message.
         assert!(parse_chat_event(&serde_json::json!({ "foo": "bar" })).is_none());
+    }
+
+    #[test]
+    fn timestamp_freshness_bounds_the_replay_window() {
+        use time::{format_description::well_known::Rfc3339, Duration, OffsetDateTime};
+        let now = OffsetDateTime::now_utc();
+        let fresh = now.format(&Rfc3339).unwrap();
+        let stale = (now - Duration::minutes(10)).format(&Rfc3339).unwrap();
+        let future = (now + Duration::minutes(10)).format(&Rfc3339).unwrap();
+        assert!(timestamp_is_fresh(&fresh), "now is fresh");
+        assert!(!timestamp_is_fresh(&stale), "10 min old is stale");
+        assert!(!timestamp_is_fresh(&future), "10 min ahead is rejected");
+        assert!(!timestamp_is_fresh("not-a-timestamp"), "garbage → false");
+    }
+
+    #[tokio::test]
+    async fn subscribe_chat_parses_the_subscription_id() {
+        use axum::{routing::post, Json, Router};
+        // Mock the events-subscriptions endpoint with Kick's documented shape.
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let app = Router::new().route(
+                "/subs",
+                post(|| async {
+                    Json(serde_json::json!({
+                        "message": "OK",
+                        "data": [{
+                            "name": "chat.message.sent",
+                            "version": 1,
+                            "subscription_id": "SUB-123",
+                            "error": ""
+                        }]
+                    }))
+                }),
+            );
+            let _ = axum::serve(listener, app).await;
+        });
+        set_subscriptions_url_for_test(format!("http://{addr}/subs"));
+
+        assert_eq!(subscribe_chat("tok").await.unwrap(), "SUB-123");
     }
 }
