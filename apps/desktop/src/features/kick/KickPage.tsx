@@ -65,6 +65,7 @@ export function KickPage() {
   const busy = unofficial.pending || kick.state === 'connecting' || kick.state === 'reconnecting';
   const connected = kick.state === 'connected';
   const authorized = status?.authorized ?? false;
+  const subscriptionActive = status?.subscriptionActive ?? false;
 
   const login = async () => {
     const ok = await official.run(async () => {
@@ -214,10 +215,31 @@ export function KickPage() {
                 Disconnect
               </Button>
             </div>
-            <p className="text-xs leading-relaxed text-white/50">
-              You&apos;ll finish setup in the next step (webhook URL) — for now this just logs you
-              in.
-            </p>
+            <div className="flex flex-col gap-2 rounded-lg border border-white/10 bg-white/5 p-3 text-xs leading-relaxed text-white/60">
+              <p className="font-medium text-white/80">One-time setup at dev.kick.com</p>
+              <ol className="list-decimal space-y-1 pl-4">
+                <li>
+                  Add redirect URI{' '}
+                  <code className="rounded bg-black/40 px-1 text-white/80">
+                    http://localhost:31337/oauth/callback
+                  </code>
+                </li>
+                <li>
+                  Expose{' '}
+                  <code className="rounded bg-black/40 px-1 text-white/80">
+                    http://localhost:31337/kick/webhook
+                  </code>{' '}
+                  over a public HTTPS tunnel and set that public URL as your app&apos;s Webhook URL.
+                </li>
+                <li>Log in below — chat votes then arrive over the webhook.</li>
+              </ol>
+              <p>
+                Chat delivery:{' '}
+                <span className={subscriptionActive ? 'text-emerald-400' : 'text-white/50'}>
+                  {subscriptionActive ? 'subscribed' : 'not subscribed yet'}
+                </span>
+              </p>
+            </div>
           </div>
         </Section>
       )}

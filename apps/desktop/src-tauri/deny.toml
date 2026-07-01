@@ -5,7 +5,15 @@ yanked = "deny"
 # Only flag unmaintained crates we directly depend on — transitive ones deep in the
 # Tauri tree (e.g. unic-ucd via urlpattern, RUSTSEC-2025-0098) have no available fix.
 unmaintained = "workspace"
-# ignore = []  # add advisory IDs here only with a justification
+# Add advisory IDs here only with a justification.
+ignore = [
+  # RUSTSEC-2023-0071 — "Marvin Attack": a timing side-channel in the `rsa`
+  # crate's PRIVATE-KEY decryption. We use `rsa` ONLY to VERIFY Kick webhook
+  # signatures with Kick's PUBLIC key (providers/kick_official.rs::verify_webhook)
+  # — no private key, no decryption, so the side-channel does not apply. No
+  # patched release exists; revisit if `rsa` ships a fix or we ever decrypt.
+  "RUSTSEC-2023-0071",
+]
 
 [licenses]
 version = 2

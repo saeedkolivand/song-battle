@@ -291,9 +291,7 @@ pub fn set_kick_tokens(
     Ok(())
 }
 
-// K2: called after creating the webhook subscription. Not yet wired to a
-// command in K1 — covered directly by db::tests::kick_auth_round_trips.
-#[allow(dead_code)]
+/// Persist (or clear) the active webhook subscription id.
 pub fn set_kick_subscription(conn: &Connection, subscription_id: Option<&str>) -> AppResult<()> {
     conn.execute(
         "UPDATE kick_auth SET subscription_id=? WHERE id=1",

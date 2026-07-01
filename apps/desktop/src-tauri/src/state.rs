@@ -12,6 +12,7 @@ use crate::domain::{
     vote::VoteChoice,
 };
 use crate::error::{AppError, AppResult};
+use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
@@ -65,6 +66,8 @@ pub struct AppState {
     app_handle: Arc<Mutex<Option<tauri::AppHandle>>>,
     kick_tasks: Arc<Mutex<Vec<JoinHandle<()>>>>,
     pending_oauth: Arc<Mutex<Option<PendingOauth>>>,
+    /// Recently-seen webhook message ids, to drop Kick's redeliveries (K2).
+    webhook_ids: Arc<Mutex<VecDeque<String>>>,
 }
 
 impl AppState {
@@ -83,7 +86,31 @@ impl AppState {
             app_handle: Arc::new(Mutex::new(None)),
             kick_tasks: Arc::new(Mutex::new(Vec::new())),
             pending_oauth: Arc::new(Mutex::new(None)),
+            webhook_ids: Arc::new(Mutex::new(VecDeque::new())),
         }
+    }
+
+    /// Record a webhook message id; returns `true` if it's new (should be
+    /// processed) or `false` if it's a redelivery we've already handled.
+    // ponytail: bounded FIFO of the last 512 ids, linear scan — trivial at chat
+    // webhook rates; swap for a HashSet+queue only if that ever gets hot.
+    pub fn webhook_id_is_new(&self, id: &str) -> bool {
+        let mut q = self.webhook_ids.lock().unwrap();
+        if q.iter().any(|x| x == id) {
+            return false;
+        }
+        if q.len() >= 512 {
+            q.pop_front();
+        }
+        q.push_back(id.to_owned());
+        true
+    }
+
+    /// Test-only peek: has this webhook id been recorded (i.e. processed past the
+    /// subscription gate)? Used to assert the gate without a full battle.
+    #[cfg(test)]
+    pub(crate) fn webhook_id_seen(&self, id: &str) -> bool {
+        self.webhook_ids.lock().unwrap().iter().any(|x| x == id)
     }
 
     pub fn set_app_handle(&self, handle: tauri::AppHandle) {
@@ -175,8 +202,7 @@ impl AppState {
         .await
     }
 
-    // K2: wired once the webhook-subscribe call lands.
-    #[allow(dead_code)]
+    /// Persist the active webhook subscription id (cleared on disconnect).
     pub async fn set_kick_subscription(&self, subscription_id: Option<String>) -> AppResult<()> {
         self.write_db(move |conn| db::set_kick_subscription(conn, subscription_id.as_deref()))
             .await
@@ -513,5 +539,13 @@ mod tests {
     fn oauth_take_without_a_pending_login_is_none() {
         let state = AppState::test();
         assert!(state.take_oauth("anything").is_none());
+    }
+
+    #[test]
+    fn webhook_ids_dedupe_replays() {
+        let state = AppState::test();
+        assert!(state.webhook_id_is_new("id-a"), "first sighting is new");
+        assert!(!state.webhook_id_is_new("id-a"), "a replay is not new");
+        assert!(state.webhook_id_is_new("id-b"), "a different id is new");
     }
 }
